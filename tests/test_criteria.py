@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.pool import StaticPool
 
 from trapline import db
@@ -24,6 +24,13 @@ def client(monkeypatch):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    # SQLite FK v defaultu nevynucuje — MariaDB ano; bez tohohle testy
+    # nechytí mazání rodiče s navázanými řádky (reálný pád v produkci)
+    @event.listens_for(engine, "connect")
+    def _fk_on(dbapi_conn, _):
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(engine)
     monkeypatch.setattr(db, "_engine", engine)
     monkeypatch.setattr(db, "_ready", True)
@@ -110,3 +117,30 @@ def test_patch_umi_zrusit_budget(client):
     r = client.patch(f"/api/criteria/{cid}", json={"budget_max": None})
     assert r.status_code == 200
     assert r.json()["budget_max"] is None
+
+
+def test_delete_pasti_s_vysledky_skoringu(client, monkeypatch):
+    """Past s uloženými výsledky skóringu musí jít smazat (FK na
+    criteria_matches) — reálný pád z produkce."""
+    from sqlalchemy.orm import Session
+
+    from trapline import scoring
+    from trapline.models import Criteria, CriteriaMatch, Product
+
+    cid = client.post("/api/criteria", json=PAST).json()["id"]
+    with Session(db._engine) as s:
+        product = Product(brand="X", model="M", model_norm="m", title="M")
+        s.add(product)
+        s.flush()
+        trap = s.get(Criteria, cid)
+        monkeypatch.setattr(
+            scoring, "_ask_llm",
+            lambda t, p: [{"pozadavek": "x", "verdikt": "splneno"}],
+        )
+        scoring.score_pair(s, trap, product)
+        s.commit()
+        assert s.query(CriteriaMatch).count() == 1
+
+    assert client.delete(f"/api/criteria/{cid}").status_code == 204
+    with Session(db._engine) as s:
+        assert s.query(CriteriaMatch).count() == 0
