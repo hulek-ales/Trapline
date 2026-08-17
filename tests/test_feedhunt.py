@@ -171,3 +171,44 @@ def test_hunt_je_za_heslem(client, monkeypatch):
     monkeypatch.setattr(settings, "app_password", "tajne")
     assert client.post("/api/discovery/hunt/1").status_code == 401
     assert client.get("/api/discovery/hunt/status").status_code == 401
+
+
+def test_extract_domains_from_html():
+    html = """
+    <a href="/preferences">nastavení</a>
+    <article><h3><a href="https://www.dobryshop.cz/autochladnicky">X</a></h3></article>
+    <article><a href="https://eshop.jiny.cz/produkt/1">Y</a></article>
+    <a href="https://www.dobryshop.cz/kontakt">dup</a>
+    """
+    assert feedhunt.extract_domains_from_html(html) == ["dobryshop.cz", "eshop.jiny.cz"]
+
+
+def test_search_html_fallback_pri_403(monkeypatch):
+    monkeypatch.setattr(settings, "searxng_url", "http://searx:1")
+    calls = []
+
+    class Resp:
+        def __init__(self, code, text=""):
+            self.status_code = code
+            self.text = text
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise feedhunt.httpx.HTTPStatusError(
+                    "x", request=None, response=self)
+        def json(self): return {}
+
+    class FakeClient:
+        def __init__(self, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def get(self, url, params=None):
+            calls.append(params)
+            if params and params.get("format") == "json":
+                return Resp(403)
+            return Resp(200, '<a href="https://www.novy-eshop.cz/x">r</a>')
+
+    monkeypatch.setattr(feedhunt.httpx, "Client", FakeClient)
+    monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
+    assert feedhunt.search_domains(["lednička"]) == ["novy-eshop.cz"]
+    assert calls[0].get("format") == "json"      # nejdřív JSON
+    assert "format" not in calls[1]              # pak HTML fallback
