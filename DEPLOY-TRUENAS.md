@@ -30,6 +30,7 @@ Za pozornost stojí:
 | Proměnná | Default | K čemu |
 |---|---|---|
 | `APP_PORT` | `38081` | port na NASu |
+| `APP_PASSWORD` | *prázdné* | **nastav** — heslo do GUI |
 | `UPDATE_ENABLED` | `true` | zpřístupní tlačítko „Aktualizovat z Gitu" |
 | `REPO_URL` / `REPO_BRANCH` | `…/Trapline.git`, `main` | co a odkud se klonuje |
 | `DB_PASSWORD` | `traplineVychoziHeslo` | **změň** |
@@ -69,6 +70,37 @@ protože doménové endpointy ještě nejsou hotové (viz „Stav" v README).
 > `UPDATE_ENABLED=true` zpřístupní tlačítko. Endpoint umí spustit `git pull`
 > a restart procesu — drž appku za reverzní proxy / Cloudflare Zero Trust,
 > ne na veřejné IP.
+
+## 4. Zabezpečení GUI
+
+`APP_PASSWORD` zapne přihlašovací obrazovku. Bez něj jsou GUI i API otevřené
+komukoli, kdo dosáhne na port — a když je zároveň zapnutý self-update, může
+kdokoli spustit `git pull` a restart. Appka na tuhle kombinaci při startu
+upozorní v logu.
+
+Za heslem je **celé `/api/`** kromě `/api/auth/*` a `/api/health` (ten musí
+zůstat veřejný, jinak by healthcheck v compose hlásil mrtvou appku). Statické
+HTML se servíruje veřejně, ale samo o sobě nic neprozrazuje — data si tahá
+až po přihlášení.
+
+Jak to funguje:
+
+* Po přihlášení dostaneš podepsaný token (HMAC + expirace) v HttpOnly cookie
+  s platností 90 dní. JS se k ní nedostane, takže XSS nemá co ukrást.
+* Podpisový klíč se **odvozuje z hesla**, ne generuje náhodně. Náhodný klíč by
+  se při každém startu měnil a self-update by tě po každé aktualizaci odhlásil.
+  Změna `APP_PASSWORD` naopak všechny staré tokeny zneplatní.
+* Po 10 neúspěšných pokusech se z dané IP na 5 minut přestane heslo přijímat.
+
+Heslo změníš přepsáním `APP_PASSWORD` a restartem appky.
+
+**Za HTTPS proxy** zapni `AUTH_COOKIE_SECURE=true`. Po LAN na http to musí
+zůstat `false`, jinak prohlížeč cookie neuloží a přihlášení se bude točit
+dokola.
+
+> Heslo je jedno sdílené, bez uživatelských účtů, a jede po http, pokud si
+> HTTPS nedáš na proxy. Na domácí appku za Zero Trust to stačí; jako jedinou
+> obranu na veřejné IP bych se na to nespoléhal.
 
 ## Mimo Docker
 

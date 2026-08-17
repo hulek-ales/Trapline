@@ -45,14 +45,38 @@
   .ok { color: var(--ok); }
   .hint { margin: .6rem 0 0; font-size: .78rem; opacity: .45; }
   [hidden] { display: none !important; }
+  input[type=password] {
+    font: inherit; padding: .5rem .65rem; border-radius: 8px; min-width: 14rem;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  .err { color: var(--warn); font-size: .88rem; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  button.link {
+    background: none; border: none; color: var(--ink); opacity: .55;
+    font-size: .82rem; padding: 0; text-decoration: underline; cursor: pointer;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Trapline</h1>
-    <p>Pasti na podhodnocené nabídky — správa a údržba</p>
+  <header class="topbar">
+    <div>
+      <h1>Trapline</h1>
+      <p>Pasti na podhodnocené nabídky — správa a údržba</p>
+    </div>
+    <button class="link" id="btn-logout" hidden>Odhlásit</button>
   </header>
+
+  <!-- Brána: dokud není přihlášeno, obsah se ani nenačítá. -->
+  <section id="login" hidden>
+    <h2>Přihlášení</h2>
+    <p class="subject">Aplikace je zabezpečená heslem.</p>
+    <form class="actions" id="login-form">
+      <input type="password" id="password" placeholder="Heslo" autocomplete="current-password" required>
+      <button type="submit" id="btn-login">Přihlásit</button>
+      <span class="err" id="login-err"></span>
+    </form>
+  </section>
 
   <!-- Panel se zobrazí jen když je UPDATE_ENABLED=true, stejně jako v Kuchařce. -->
   <section id="system" hidden>
@@ -80,11 +104,24 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const api = {
-  version: () => fetch("/api/system/version").then((r) => r.json()),
+  authStatus: () => fetch("/api/auth/status").then(ok),
+  login: (password) => fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  }).then(ok),
+  logout: () => fetch("/api/auth/logout", { method: "POST" }).then(ok),
+  version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
 };
-function ok(r) { if (!r.ok) throw new Error(r.status); return r.json(); }
+// Token nosí HttpOnly cookie, takže stačí obyčejný fetch. 401 = vypršelá
+// relace → zpátky na přihlášení.
+function ok(r) {
+  if (r.status === 401) { showLogin(); throw new Error("401"); }
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
 
 let version = null;
 let busy = false;
@@ -108,8 +145,49 @@ function render(v) {
 }
 
 async function loadVersion() {
-  try { render(await api.version()); } catch { /* API startuje */ }
+  try { render(await api.version()); } catch { /* API startuje nebo 401 */ }
 }
+
+function showLogin() {
+  $("login").hidden = false;
+  $("system").hidden = true;
+  $("btn-logout").hidden = true;
+}
+
+async function boot() {
+  let st;
+  try {
+    st = await api.authStatus();
+  } catch {
+    return; // API ještě nejede
+  }
+  if (st.required && !st.authenticated) { showLogin(); return; }
+  $("login").hidden = true;
+  $("btn-logout").hidden = !st.required;
+  loadVersion();
+}
+
+$("login-form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("login-err").textContent = "";
+  $("btn-login").disabled = true;
+  try {
+    await api.login($("password").value);
+    $("password").value = "";
+    await boot();
+  } catch (err) {
+    $("login-err").textContent =
+      err.message === "429" ? "Příliš mnoho pokusů, zkus to za pár minut."
+                            : "Špatné heslo.";
+  } finally {
+    $("btn-login").disabled = false;
+  }
+};
+
+$("btn-logout").onclick = async () => {
+  try { await api.logout(); } catch { /* stejně překreslíme */ }
+  showLogin();
+};
 
 $("btn-check").onclick = async () => {
   setBusy(true);
@@ -167,7 +245,7 @@ $("btn-update").onclick = async () => {
   }
 };
 
-loadVersion();
+boot();
 </script>
 </body>
 </html>

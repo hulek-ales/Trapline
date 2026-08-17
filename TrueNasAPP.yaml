@@ -12,6 +12,14 @@ services:
       db:
         condition: service_healthy
     environment:
+      # --- zabezpečení GUI ------------------------------------------------
+      # Prázdné = GUI i API jsou otevřené komukoli, kdo na port dosáhne.
+      # Nastav ho vždy, když je zapnutý self-update: /api/system/update umí
+      # spustit git pull a restartovat proces.
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      # Zapni, až budeš appku provozovat za HTTPS proxy. Po LAN na http musí
+      # zůstat false, jinak prohlížeč přihlašovací cookie neuloží.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       # --- self-update z GUI ---------------------------------------------
       # UPDATE_ENABLED=true zpřístupní tlačítko. Bez něj se panel v GUI
       # nevykreslí a /api/system/{check,update} vrací 403.
