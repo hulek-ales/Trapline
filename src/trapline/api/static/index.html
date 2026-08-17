@@ -65,6 +65,12 @@
   td.num { font-variant-numeric: tabular-nums; }
   tr.inactive td { opacity: .45; }
   .empty { opacity: .5; font-size: .9rem; margin: .5rem 0 1rem; }
+  .badge {
+    display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+    font-size: .78rem; font-variant-numeric: tabular-nums; cursor: help;
+    border: 1px solid var(--line); opacity: .75;
+  }
+  .badge.rel { border-color: var(--ok); color: var(--ok); opacity: 1; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -119,13 +125,15 @@
     <p class="subject">Modely nalezené discovery během — parametry, rozpětí cen, odkazy.</p>
     <p class="empty" id="catalog-empty" hidden>Zatím prázdný. Přidej zdroj feedu níž a spusť discovery.</p>
     <table id="catalog-table" hidden>
-      <thead><tr><th>Produkt</th><th>Značka</th><th>Cena</th><th>Obchody</th><th>Parametry</th></tr></thead>
+      <thead><tr><th>Produkt</th><th>Značka</th><th>Cena</th><th>Skóre</th><th>Obchody</th><th>Parametry</th></tr></thead>
       <tbody id="catalog-body"></tbody>
     </table>
     <div class="actions">
       <button id="btn-discover">Spustit discovery</button>
+      <button id="btn-score">Spustit skóring</button>
       <span class="msg" id="discovery-msg"></span>
     </div>
+    <p class="hint" id="ollama-status"></p>
   </section>
 
   <section id="sources" hidden>
@@ -202,6 +210,9 @@ const api = {
   discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
   discoveryStatus: () => fetch("/api/discovery/status").then(ok),
   products: () => fetch("/api/discovery/products").then(ok),
+  scoringRun:    () => fetch("/api/scoring/run", { method: "POST" }).then(ok),
+  scoringStatus: () => fetch("/api/scoring/status").then(ok),
+  ollama:        () => fetch("/api/scoring/ollama").then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -248,10 +259,49 @@ function showLogin() {
 function fmtSpecs(specs) {
   const parts = [];
   for (const [k, v] of Object.entries(specs || {})) {
+    if (k.startsWith("_")) continue;  // interní klíče (popis pro LLM)
     parts.push(`${k}: ${Array.isArray(v) ? v.join("/") : v}`);
   }
   return parts.join(" · ");
 }
+
+async function loadOllama() {
+  try {
+    const o = await api.ollama();
+    const el = $("ollama-status");
+    if (!o.reachable) {
+      el.textContent = `LLM nedostupné: ${o.url || "URL nenastaveno"} (${o.error || ""})`;
+    } else if (!o.model_available) {
+      el.textContent = `LLM připojeno (${o.url}), ale model ${o.model} na serveru není. K dispozici: ${(o.models || []).join(", ")}`;
+    } else {
+      el.textContent = `LLM připraveno: ${o.model} @ ${o.url}`;
+    }
+  } catch { /* nepřihlášen nebo API mimo */ }
+}
+
+$("btn-score").onclick = async () => {
+  $("btn-score").disabled = true;
+  $("discovery-msg").textContent = "Spouštím skóring…";
+  try {
+    await api.scoringRun();
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.scoringStatus();
+        $("discovery-msg").textContent = st.log.length ? st.log[st.log.length - 1] : "běží…";
+        if (!st.running) {
+          clearInterval(poll);
+          $("btn-score").disabled = false;
+          await loadCatalog();
+        }
+      } catch { /* přechodná chyba */ }
+    }, 2000);
+  } catch (err) {
+    $("discovery-msg").textContent = err.message === "409" ? "Skóring už běží."
+      : err.message === "400" ? "Chybí past, katalog nebo OLLAMA_URL."
+      : "Spuštění selhalo.";
+    $("btn-score").disabled = false;
+  }
+};
 
 async function loadCatalog() {
   let rows;
@@ -265,10 +315,17 @@ async function loadCatalog() {
       : p.price_min === p.price_max ? `${p.price_min} Kč`
       : `${p.price_min}–${p.price_max} Kč`;
     const link = p.urls.length ? ` <a href="${esc(p.urls[0])}" target="_blank" rel="noopener">↗</a>` : "";
+    const badges = (p.matches || []).map((m) => {
+      const why = (m.breakdown || [])
+        .map((b) => `${b.verdikt === "splneno" ? "✓" : b.verdikt === "nesplneno" ? "✗" : "?"} ${b.pozadavek}${b.pozn ? " — " + b.pozn : ""}`)
+        .join("\n");
+      return `<span class="badge ${m.relevant ? "rel" : ""}" title="${esc(m.criteria_name)}\n${esc(why)}">${Math.round(m.score)}${m.relevant ? " ✓" : ""}</span>`;
+    }).join(" ");
     return `<tr>
       <td>${esc(p.title)}${link}</td>
       <td>${esc(p.brand)}</td>
       <td class="num">${esc(price)}</td>
+      <td>${badges || "—"}</td>
       <td class="num">${p.offers}</td>
       <td style="font-size:.78rem;opacity:.65">${esc(fmtSpecs(p.specs)).slice(0, 300)}</td>
     </tr>`;
@@ -451,6 +508,7 @@ async function boot() {
   loadTraps();
   loadCatalog();
   loadSources();
+  loadOllama();
 }
 
 $("login-form").onsubmit = async (e) => {

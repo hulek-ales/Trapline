@@ -32,11 +32,19 @@ class FeedItem:
     ean: str | None = None
     manufacturer: str | None = None
     category: str | None = None
+    description: str | None = None
     params: dict = field(default_factory=dict)
 
 
 def _text(el: ET.Element | None) -> str:
     return (el.text or "").strip() if el is not None else ""
+
+
+def _strip_html(raw: str, limit: int = 1500) -> str:
+    """DESCRIPTION bývá HTML — pro LLM stačí čistý text, oříznutý."""
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
 
 
 def _price(raw: str) -> float | None:
@@ -78,6 +86,7 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
                 params[key] = val
 
         ean = _text(el.find("EAN"))
+        description = _strip_html(_text(el.find("DESCRIPTION")))
         items.append(
             FeedItem(
                 item_id=_text(el.find("ITEM_ID")) or url,
@@ -87,6 +96,7 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
                 ean=ean if re.fullmatch(r"\d{8,14}", ean) else None,
                 manufacturer=_text(el.find("MANUFACTURER")) or None,
                 category=_text(el.find("CATEGORYTEXT")) or None,
+                description=description or None,
                 params=params,
             )
         )

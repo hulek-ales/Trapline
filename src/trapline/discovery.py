@@ -68,13 +68,17 @@ def _upsert_product(session: Session, item: FeedItem) -> Product:
             )
         ).first()
     if product is None:
+        specs = dict(item.params)
+        if item.description:
+            # klíče s podtržítkem GUI nezobrazuje; popis je vstup pro LLM
+            specs["_popis"] = item.description
         product = Product(
             ean=item.ean,
             brand=brand,
             model=item.name[:160],
             model_norm=model_norm,
             title=item.name[:255],
-            specs=item.params,
+            specs=specs,
         )
         session.add(product)
         session.flush()
@@ -84,6 +88,8 @@ def _upsert_product(session: Session, item: FeedItem) -> Product:
         product.ean = item.ean
     # parametry slučuj, nové klíče vyhrávají nad chybějícími, existující nech
     merged = dict(item.params)
+    if item.description:
+        merged["_popis"] = item.description
     merged.update(product.specs or {})
     product.specs = merged
     return product
