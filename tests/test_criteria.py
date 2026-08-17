@@ -103,3 +103,10 @@ def test_kriteria_jsou_za_heslem(client, monkeypatch):
     monkeypatch.setattr(settings, "app_password", "tajne")
     assert client.get("/api/criteria").status_code == 401
     assert client.post("/api/criteria", json=PAST).status_code == 401
+
+
+def test_patch_umi_zrusit_budget(client):
+    cid = client.post("/api/criteria", json=PAST).json()["id"]
+    r = client.patch(f"/api/criteria/{cid}", json={"budget_max": None})
+    assert r.status_code == 200
+    assert r.json()["budget_max"] is None
