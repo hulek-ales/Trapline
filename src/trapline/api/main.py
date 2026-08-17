@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import db, logbuffer
 from ..config import settings
-from . import auth, criteria, discovery, scoring, system
+from . import auth, criteria, discovery, feedback, scoring, system
 
 log = logging.getLogger("trapline.api")
 
@@ -59,6 +59,7 @@ app.include_router(system.router)
 app.include_router(criteria.router)
 app.include_router(discovery.router)
 app.include_router(scoring.router)
+app.include_router(feedback.router)
 
 
 @app.middleware("http")

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -40,13 +40,41 @@ def get_engine() -> Engine:
     return _engine
 
 
+#: Aditivní migrace: create_all nové sloupce do existujících tabulek
+#: nepřidá. Alembic přijde s první destruktivní změnou; do té doby stačí
+#: idempotentní ALTERy (přeskočí se, když sloupec existuje).
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    (
+        "criteria",
+        "prefilter",
+        "ALTER TABLE criteria ADD COLUMN prefilter VARCHAR(500) NOT NULL DEFAULT ''",
+    ),
+]
+
+
+def _migrate(engine: Engine) -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    for table, column, ddl in _MIGRATIONS:
+        if table not in tables:
+            continue
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        if column in columns:
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(ddl))
+        log.info("migrace: %s.%s přidán", table, column)
+
+
 def ensure_ready() -> bool:
     """Vytvoř schéma, pokud ještě není. True = DB je použitelná."""
     global _ready
     if _ready:
         return True
     try:
-        Base.metadata.create_all(get_engine())
+        engine = get_engine()
+        Base.metadata.create_all(engine)
+        _migrate(engine)
         _ready = True
         log.info("Databáze připravená (%s tabulek).", len(Base.metadata.tables))
     except Exception as exc:  # noqa: BLE001

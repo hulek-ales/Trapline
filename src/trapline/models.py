@@ -100,6 +100,9 @@ class Criteria(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     query_terms: Mapped[list] = mapped_column(JSON, default=list)
+    #: Levný předfiltr katalogu (čárkou oddělené podřetězce jako u zdrojů):
+    #: LLM skóring hodnotí jen produkty, které projdou. Prázdné = všechno.
+    prefilter: Mapped[str] = mapped_column(String(500), default="")
     hard: Mapped[dict] = mapped_column(JSON, default=dict)
     soft: Mapped[dict] = mapped_column(JSON, default=dict)
     budget_max: Mapped[float | None] = mapped_column(Float)
