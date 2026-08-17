@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import db
+from .. import db, logbuffer
 from ..config import settings
 from . import auth, criteria, discovery, scoring, system
 
@@ -44,6 +44,7 @@ def _warn_o_zabezpeceni() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logbuffer.install()
     _warn_o_zabezpeceni()
     # Nezdar nevadí — start na DB nečeká, doménové endpointy vrací 503
     # a při dalším requestu se o inicializaci pokusí znovu.

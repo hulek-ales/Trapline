@@ -33,6 +33,7 @@ class FeedItem:
     manufacturer: str | None = None
     category: str | None = None
     description: str | None = None
+    image: str | None = None
     params: dict = field(default_factory=dict)
 
 
@@ -97,6 +98,7 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
                 manufacturer=_text(el.find("MANUFACTURER")) or None,
                 category=_text(el.find("CATEGORYTEXT")) or None,
                 description=description or None,
+                image=_text(el.find("IMGURL")) or None,
                 params=params,
             )
         )

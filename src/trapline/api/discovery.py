@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import discovery
+from .. import discovery, grouping
 from ..models import Criteria, CriteriaMatch, FeedSource, PriceHistory, Product
 from .criteria import get_db
 
@@ -130,7 +130,11 @@ class ProductOut(BaseModel):
     price_min: float | None
     price_max: float | None
     urls: list[str]
+    image: str | None = None
     matches: list[MatchOut] = []
+    #: Barevné varianty sloučené do jednoho řádku (názvy). 1 = bez variant.
+    variant_count: int = 1
+    variant_titles: list[str] = []
 
 
 @router.get("/products", response_model=list[ProductOut])
@@ -154,6 +158,9 @@ def list_products(session: DbSession, limit: int = 200):
         )
     out: list[ProductOut] = []
     for product in products:
+        specs = {
+            k: v for k, v in (product.specs or {}).items() if not k.startswith("_")
+        }
         prices: list[float] = []
         urls: list[str] = []
         for offer in product.offers:
@@ -174,12 +181,64 @@ def list_products(session: DbSession, limit: int = 200):
                 ean=product.ean,
                 brand=product.brand,
                 title=product.title,
-                specs=product.specs or {},
+                specs=specs,
                 offers=len(urls),
                 price_min=min(prices) if prices else None,
                 price_max=max(prices) if prices else None,
                 urls=urls,
+                image=(product.specs or {}).get("_img"),
                 matches=matches_by_product.get(product.id, []),
+            )
+        )
+    return _group_families(out, products)
+
+
+def _group_families(
+    rows: list[ProductOut], products: list[Product]
+) -> list[ProductOut]:
+    """Sluč barevné varianty téhož modelu do jednoho řádku (grouping.py)."""
+    by_id = {p.id: p for p in products}
+    families: dict[str, list[ProductOut]] = {}
+    order: list[str] = []
+    for row in rows:
+        key = grouping.family_key(row.brand, by_id[row.id].title)
+        if key not in families:
+            families[key] = []
+            order.append(key)
+        families[key].append(row)
+
+    out: list[ProductOut] = []
+    for key in order:
+        members = families[key]
+        if len(members) == 1:
+            out.append(members[0])
+            continue
+        head = members[0]
+        prices = [
+            p for m in members for p in (m.price_min, m.price_max) if p is not None
+        ]
+        # skóre: nejlepší match na past napříč variantami
+        best: dict[int, MatchOut] = {}
+        for m in members:
+            for match in m.matches:
+                cur = best.get(match.criteria_id)
+                if cur is None or match.score > cur.score:
+                    best[match.criteria_id] = match
+        out.append(
+            ProductOut(
+                id=head.id,
+                ean=None,
+                brand=head.brand,
+                title=grouping.family_title([m.title for m in members]),
+                specs=head.specs,
+                offers=sum(m.offers for m in members),
+                price_min=min(prices) if prices else None,
+                price_max=max(prices) if prices else None,
+                urls=[u for m in members for u in m.urls],
+                image=next((m.image for m in members if m.image), None),
+                matches=sorted(best.values(), key=lambda x: x.criteria_id),
+                variant_count=len(members),
+                variant_titles=[m.title for m in members],
             )
         )
     return out

@@ -71,6 +71,22 @@
     border: 1px solid var(--line); opacity: .75;
   }
   .badge.rel { border-color: var(--ok); color: var(--ok); opacity: 1; font-weight: 600; }
+  .thumb {
+    width: 52px; height: 52px; object-fit: contain; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--line); display: block;
+  }
+  .variants { font-size: .75rem; opacity: .55; }
+  .loglist {
+    font: .78rem/1.5 ui-monospace, monospace; max-height: 16rem;
+    overflow-y: auto; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: .6rem .8rem; white-space: pre-wrap;
+  }
+  .loglist .warn { color: var(--warn); }
+  .procrow { display: flex; gap: .6rem; align-items: baseline; font-size: .88rem; margin-bottom: .3rem; }
+  .procrow b { min-width: 6.5rem; display: inline-block; }
+  .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--line); }
+  .dot.on { background: var(--ok); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
 </style>
 </head>
 <body>
@@ -125,7 +141,7 @@
     <p class="subject">Modely nalezené discovery během — parametry, rozpětí cen, odkazy.</p>
     <p class="empty" id="catalog-empty" hidden>Zatím prázdný. Přidej zdroj feedu níž a spusť discovery.</p>
     <table id="catalog-table" hidden>
-      <thead><tr><th>Produkt</th><th>Značka</th><th>Cena</th><th>Skóre</th><th>Obchody</th><th>Parametry</th></tr></thead>
+      <thead><tr><th></th><th>Produkt</th><th>Značka</th><th>Cena</th><th>Skóre</th><th>Obchody</th><th>Parametry</th></tr></thead>
       <tbody id="catalog-body"></tbody>
     </table>
     <div class="actions">
@@ -151,6 +167,16 @@
       <button type="submit">Přidat zdroj</button>
       <span class="msg" id="sources-msg"></span>
     </form>
+  </section>
+
+  <section id="procs" hidden>
+    <div class="row">
+      <h2>Procesy a logy</h2>
+      <button class="link" id="btn-logs-refresh">obnovit</button>
+    </div>
+    <div class="procrow"><span class="dot" id="proc-disc-dot"></span><b>Discovery</b><span class="msg" id="proc-disc"></span></div>
+    <div class="procrow"><span class="dot" id="proc-score-dot"></span><b>Skóring</b><span class="msg" id="proc-score"></span></div>
+    <div class="loglist" id="loglist">—</div>
   </section>
 
   <!-- Panel se zobrazí jen když je UPDATE_ENABLED=true, stejně jako v Kuchařce. -->
@@ -213,6 +239,7 @@ const api = {
   scoringRun:    () => fetch("/api/scoring/run", { method: "POST" }).then(ok),
   scoringStatus: () => fetch("/api/scoring/status").then(ok),
   ollama:        () => fetch("/api/scoring/ollama").then(ok),
+  syslog:        () => fetch("/api/system/log?limit=80").then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -252,7 +279,7 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "catalog", "sources"]) $(id).hidden = true;
+  for (const id of ["system", "traps", "catalog", "sources", "procs"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
 }
 
@@ -264,6 +291,45 @@ function fmtSpecs(specs) {
   }
   return parts.join(" · ");
 }
+
+function fmtProc(st) {
+  if (st.running) return "běží — " + (st.log.length ? st.log[st.log.length - 1] : "…");
+  if (st.finished) return `naposledy doběhl ${new Date(st.finished).toLocaleTimeString("cs")} — ` +
+    (st.log.length ? st.log[st.log.length - 1] : "");
+  return "zatím neběžel";
+}
+
+let procsTimer = null;
+
+async function loadProcs() {
+  let disc, score, logs;
+  try {
+    [disc, score, logs] = await Promise.all([
+      api.discoveryStatus(), api.scoringStatus(), api.syslog(),
+    ]);
+  } catch { return; }
+  $("procs").hidden = false;
+  $("proc-disc").textContent = fmtProc(disc);
+  $("proc-score").textContent = fmtProc(score);
+  $("proc-disc-dot").className = "dot" + (disc.running ? " on" : "");
+  $("proc-score-dot").className = "dot" + (score.running ? " on" : "");
+  const items = logs.items || [];
+  $("loglist").innerHTML = items.length
+    ? items.map((r) => `<div class="${r.level === "WARNING" || r.level === "ERROR" ? "warn" : ""}">` +
+        `${esc(r.ts.slice(11, 19))} ${esc(r.msg)}</div>`).join("")
+    : "—";
+  // dokud něco běží, obnovuj automaticky (a po doběhnutí překresli katalog)
+  const running = disc.running || score.running;
+  if (running && !procsTimer) {
+    procsTimer = setInterval(loadProcs, 3000);
+  } else if (!running && procsTimer) {
+    clearInterval(procsTimer);
+    procsTimer = null;
+    loadCatalog();
+  }
+}
+
+$("btn-logs-refresh").onclick = loadProcs;
 
 async function loadOllama() {
   try {
@@ -321,8 +387,13 @@ async function loadCatalog() {
         .join("\n");
       return `<span class="badge ${m.relevant ? "rel" : ""}" title="${esc(m.criteria_name)}\n${esc(why)}">${Math.round(m.score)}${m.relevant ? " ✓" : ""}</span>`;
     }).join(" ");
+    const img = p.image
+      ? `<img class="thumb" loading="lazy" src="${esc(p.image)}" alt="">` : "";
+    const variants = p.variant_count > 1
+      ? `<div class="variants" title="${esc(p.variant_titles.join("\n"))}">${p.variant_count} varianty</div>` : "";
     return `<tr>
-      <td>${esc(p.title)}${link}</td>
+      <td>${img}</td>
+      <td>${esc(p.title)}${link}${variants}</td>
       <td>${esc(p.brand)}</td>
       <td class="num">${esc(price)}</td>
       <td>${badges || "—"}</td>
@@ -509,6 +580,7 @@ async function boot() {
   loadCatalog();
   loadSources();
   loadOllama();
+  loadProcs();
 }
 
 $("login-form").onsubmit = async (e) => {
