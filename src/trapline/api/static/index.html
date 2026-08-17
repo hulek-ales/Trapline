@@ -121,9 +121,13 @@
       <button class="link" id="td-back">← zpět na přehled</button>
     </div>
     <p class="subject" id="td-terms"></p>
-    <label class="subject" style="display:block;margin:.3rem 0 .6rem">
-      <input type="checkbox" id="td-only-rel"> jen relevantní
-    </label>
+    <div class="actions" style="margin:.3rem 0 .6rem">
+      <label class="subject" style="margin:0">
+        <input type="checkbox" id="td-only-rel"> jen relevantní
+      </label>
+      <button class="link" id="td-hunt">🔍 najít další obchody</button>
+      <span class="msg" id="td-hunt-msg"></span>
+    </div>
     <p class="empty" id="td-empty" hidden>Žádné výsledky — spusť skóring na hlavní stránce.</p>
     <table id="td-table" hidden>
       <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th><th></th></tr></thead>
@@ -178,7 +182,7 @@
     <p class="subject">Heureka XML feedy eshopů, ze kterých se staví katalog.</p>
     <p class="empty" id="sources-empty" hidden>Žádný zdroj. Přidej první níž.</p>
     <table id="sources-table" hidden>
-      <thead><tr><th>Název</th><th>Filtr kategorií</th><th>Poslední běh</th><th></th></tr></thead>
+      <thead><tr><th>Název</th><th>Filtr kategorií</th><th>Poslední běh</th><th></th><th></th></tr></thead>
       <tbody id="sources-body"></tbody>
     </table>
     <div class="actions" style="margin-bottom:.6rem">
@@ -202,6 +206,7 @@
     </div>
     <div class="procrow"><span class="dot" id="proc-disc-dot"></span><b>Discovery</b><span class="msg" id="proc-disc"></span></div>
     <div class="procrow"><span class="dot" id="proc-score-dot"></span><b>Skóring</b><span class="msg" id="proc-score"></span></div>
+    <div class="procrow"><span class="dot" id="proc-hunt-dot"></span><b>Zdroje</b><span class="msg" id="proc-hunt"></span></div>
     <div class="actions" style="margin:.4rem 0 .6rem">
       <button id="btn-score">Spustit skóring</button>
       <span class="hint" id="ollama-status" style="margin:0"></span>
@@ -270,6 +275,12 @@ const api = {
   scoringStatus: () => fetch("/api/scoring/status").then(ok),
   ollama:        () => fetch("/api/scoring/ollama").then(ok),
   syslog:        () => fetch("/api/system/log?limit=80").then(ok),
+  hunt:       (id) => fetch(`/api/discovery/hunt/${id}`, { method: "POST" }).then(ok),
+  huntStatus: () => fetch("/api/discovery/hunt/status").then(ok),
+  sourcePatch: (id, v) => fetch(`/api/discovery/sources/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(v),
+  }).then(ok),
   setVerdict: (id, v) => fetch(`/api/products/${id}/verdict`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ verdict: v }),
@@ -406,6 +417,20 @@ window.addEventListener("hashchange", route);
 $("td-back").onclick = () => { location.hash = ""; };
 $("td-only-rel").onchange = route;
 
+$("td-hunt").onclick = async () => {
+  const m = location.hash.match(/^#past\/(\d+)$/);
+  if (!m) return;
+  $("td-hunt").disabled = true;
+  try {
+    const r = await api.hunt(Number(m[1]));
+    $("td-hunt-msg").textContent = r.message + " Průběh v Procesech na hlavní stránce.";
+  } catch (err) {
+    $("td-hunt-msg").textContent = err.message === "400"
+      ? "SEARXNG_URL není nastavené." : err.message === "409"
+      ? "Hledání už běží." : "Spuštění selhalo.";
+  } finally { $("td-hunt").disabled = false; }
+};
+
 $("td-body").onclick = async (e) => {
   const btn = e.target.closest("button[data-v]");
   if (!btn) return;
@@ -431,24 +456,26 @@ function fmtProc(st) {
 let procsTimer = null;
 
 async function loadProcs() {
-  let disc, score, logs;
+  let disc, score, hunt, logs;
   try {
-    [disc, score, logs] = await Promise.all([
-      api.discoveryStatus(), api.scoringStatus(), api.syslog(),
+    [disc, score, hunt, logs] = await Promise.all([
+      api.discoveryStatus(), api.scoringStatus(), api.huntStatus(), api.syslog(),
     ]);
   } catch { return; }
   $("procs").hidden = false;
   $("proc-disc").textContent = fmtProc(disc);
   $("proc-score").textContent = fmtProc(score);
+  $("proc-hunt").textContent = fmtProc(hunt);
   $("proc-disc-dot").className = "dot" + (disc.running ? " on" : "");
   $("proc-score-dot").className = "dot" + (score.running ? " on" : "");
+  $("proc-hunt-dot").className = "dot" + (hunt.running ? " on" : "");
   const items = logs.items || [];
   $("loglist").innerHTML = items.length
     ? items.map((r) => `<div class="${r.level === "WARNING" || r.level === "ERROR" ? "warn" : ""}">` +
         `${esc(new Date(r.ts).toLocaleTimeString("cs"))} ${esc(r.msg)}</div>`).join("")
     : "—";
   // dokud něco běží, obnovuj automaticky (a po doběhnutí překresli katalog)
-  const running = disc.running || score.running;
+  const running = disc.running || score.running || hunt.running;
   if (running && !procsTimer) {
     procsTimer = setInterval(loadProcs, 3000);
   } else if (!running && procsTimer) {
@@ -544,18 +571,27 @@ async function loadSources() {
       <td>${esc(s.name)}</td>
       <td style="font-size:.8rem">${esc(s.category_filter || "—")}</td>
       <td style="font-size:.8rem;opacity:.65">${esc(s.last_status || "zatím neběžel")}</td>
+      <td><button class="link" data-act="toggle">${s.enabled ? "vypnout" : "povolit"}</button></td>
       <td><button class="link" data-act="del">smazat</button></td>
     </tr>`).join("");
 }
 
 $("sources-body").onclick = async (e) => {
-  const btn = e.target.closest("button[data-act=del]");
+  const btn = e.target.closest("button[data-act]");
   if (!btn) return;
-  if (!confirm("Smazat zdroj feedu?")) return;
+  const id = Number(btn.closest("tr").dataset.id);
+  btn.disabled = true;
   try {
-    await api.sourceDelete(Number(btn.closest("tr").dataset.id));
+    if (btn.dataset.act === "del") {
+      if (!confirm("Smazat zdroj feedu?")) return;
+      await api.sourceDelete(id);
+    } else {
+      const enabled = btn.textContent === "povolit";
+      await api.sourcePatch(id, { enabled });
+    }
     await loadSources();
-  } catch { $("sources-msg").textContent = "Smazání selhalo."; }
+  } catch { $("sources-msg").textContent = "Akce selhala."; }
+  finally { btn.disabled = false; }
 };
 
 $("source-form").onsubmit = async (e) => {

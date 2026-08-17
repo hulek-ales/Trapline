@@ -38,6 +38,8 @@ class Settings:
         )
 
         self.ollama_url: str = _env("OLLAMA_URL")
+        #: SearXNG pro automatické hledání zdrojů (feedhunt). Prázdné = vypnuto.
+        self.searxng_url: str = _env("SEARXNG_URL")
         self.llm_bulk: str = _env("LLM_BULK", "qwen3:4b")
         self.llm_main: str = _env("LLM_MAIN", "qwen3:14b")
 
