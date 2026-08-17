@@ -14,8 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .. import db
-from ..models import Criteria, CriteriaMatch
+from .. import db, scoring
+from ..config import settings
+from ..models import Criteria, CriteriaMatch, Product
 
 router = APIRouter(prefix="/api/criteria", tags=["criteria"])
 
@@ -85,10 +86,44 @@ def create_criteria(payload: CriteriaIn, session: DbSession):
 @router.patch("/{criteria_id}", response_model=CriteriaOut)
 def update_criteria(criteria_id: int, payload: CriteriaPatch, session: DbSession):
     row = _get_or_404(session, criteria_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+
+    #: Změna zadání dělá stará skóre bezcennými — vyhází se hned, ne až je
+    #: přepíše další běh. Jinak by stránka pasti ukazovala výsledky proti
+    #: zadání, které už neplatí.
+    zadani_changed = any(
+        key in data and data[key] != getattr(row, key)
+        for key in ("query_terms", "hard", "soft")
+    )
+    prefilter_changed = "prefilter" in data and data["prefilter"] != row.prefilter
+
+    for key, value in data.items():
         setattr(row, key, value)
+
+    if zadani_changed:
+        session.execute(
+            delete(CriteriaMatch).where(CriteriaMatch.criteria_id == criteria_id)
+        )
+    elif prefilter_changed:
+        # jen zúžení záběru: vyhoď výsledky produktů, které novým
+        # předfiltrem neprojdou; zbylá skóre platí dál
+        keep = {
+            p.id for p in session.scalars(select(Product))
+            if scoring.passes_prefilter(row, p)
+        }
+        session.execute(
+            delete(CriteriaMatch).where(
+                CriteriaMatch.criteria_id == criteria_id,
+                CriteriaMatch.product_id.not_in(keep),
+            )
+        )
+
     session.commit()
     session.refresh(row)
+
+    # po změně zadání rovnou přeskórovat, ať uživatel nečeká na ruční klik
+    if (zadani_changed or prefilter_changed) and row.active and settings.ollama_url:
+        scoring.start()  # False = už běží, to nevadí
     return row
 
 
