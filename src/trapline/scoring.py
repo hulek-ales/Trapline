@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from . import db, llm
 from .config import settings
+from .crawlers.heureka_feed import normalize
 from .models import Criteria, CriteriaMatch, Product
 
 log = logging.getLogger("trapline.scoring")
@@ -54,18 +55,28 @@ _SCHEMA = {
     "required": ["pozadavky"],
 }
 
+#: Verze promptu — je součástí criteria_rev, takže její zvednutí
+#: zneplatní všechna stará skóre a vynutí přeskórování.
+PROMPT_REV = "2"
+
 _SYSTEM = (
     "Jsi přísný hodnotitel produktů pro nákupního agenta. Uživatel zadal "
     "požadavky volným textem; dostaneš název, značku, parametry a případně "
     "popis produktu. Pro KAŽDÝ požadavek rozhodni verdikt: splneno / "
     "nesplneno / nelze_urcit.\n"
+    "Verdikt splneno dávej JEN když má požadavek oporu v technických "
+    "údajích: v parametrech, v názvu, nebo v konkrétním číselném/technickém "
+    "údaji popisu. Marketingovým a reklamním tvrzením v popisu nevěř — bez "
+    "technické opory dej nelze_urcit.\n"
     "Odvozuj, nepapouškuj: přepočítávej rozměry a objemy (např. „4× 2l "
     "láhev“ znamená vnitřní objem zhruba od 16 l a výšku na stojící "
     "láhev ~32 cm; není-li výška známa, posuzuj objem), interpretuj parametry "
-    "psané různými formáty („12V/230V“ = „autozásuvka i síť“). "
-    "Využívej obecné znalosti o typu produktu (pasivní chladicí box nemá "
-    "kompresor ani napájení, takže napájecí požadavky nesplňuje). Když data "
-    "chybí a nejde to odvodit ani z typu produktu, dej nelze_urcit.\n"
+    "psané různými formáty („12V/230V“ = „autozásuvka i síť“).\n"
+    "Využívej znalosti o typu produktu i PROTI popisu: pasivní chladicí box "
+    "nemá kompresor ani napájení; termoelektrický (Peltier) box chladí jen "
+    "~18–25 °C pod okolí a mrazit neumí, ať popis tvrdí cokoli; kuchyňská "
+    "chladnička na 230 V není přenosná a nemá 12V napájení, pokud to "
+    "parametry výslovně neuvádí.\n"
     "Vrať požadavky ve stejném pořadí. Poznámky piš česky, drž je pod 15 "
     "slov a nepoužívej v nich uvozovky ani apostrofy."
 )
@@ -94,11 +105,22 @@ def criteria_rev(trap: Criteria) -> str:
             "query_terms": trap.query_terms,
             "hard": trap.hard,
             "soft": trap.soft,
+            "prompt_rev": PROMPT_REV,
         },
         sort_keys=True,
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def passes_prefilter(trap: Criteria, product: Product) -> bool:
+    """Levný předfiltr: čárkou oddělené podřetězce proti značce+názvu.
+    Prázdný filtr pouští všechno (dosavadní chování)."""
+    terms = [normalize(t) for t in (trap.prefilter or "").split(",") if t.strip()]
+    if not terms:
+        return True
+    haystack = normalize(f"{product.brand} {product.title}")
+    return any(t in haystack for t in terms)
 
 
 def _product_payload(product: Product) -> dict:
@@ -182,11 +204,16 @@ def _run_all() -> None:
                         )
                     )
                 }
+                scoped = [p for p in products if passes_prefilter(trap, p)]
                 todo = [
-                    p for p in products
+                    p for p in scoped
                     if p.id not in current or current[p.id].criteria_rev != rev
                 ]
-                _note(f"past „{trap.name}“: {len(todo)} k vyhodnocení")
+                skipped = len(products) - len(scoped)
+                _note(
+                    f"past „{trap.name}“: {len(todo)} k vyhodnocení"
+                    + (f" (předfiltr vyřadil {skipped})" if skipped else "")
+                )
                 done = relevant_n = 0
                 for product in todo:
                     try:

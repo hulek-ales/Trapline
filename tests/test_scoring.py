@@ -189,3 +189,58 @@ def test_scoring_je_za_heslem(client, monkeypatch):
     monkeypatch.setattr(settings, "app_password", "tajne")
     assert client.post("/api/scoring/run").status_code == 401
     assert client.get("/api/scoring/ollama").status_code == 401
+
+
+def test_prefilter_omezuje_zaber(session, monkeypatch):
+    trap = _trap(session)
+    trap.prefilter = "chladni, lednic"
+    fridge = _product(session, title="Autochladnička BBPF-30A")
+    knife = _product(session, title="Zavírací nůž MAM Douro")
+    assert scoring.passes_prefilter(trap, fridge)
+    assert not scoring.passes_prefilter(trap, knife)
+
+
+def test_prazdny_prefilter_pousti_vse(session):
+    trap = _trap(session)
+    trap.prefilter = ""
+    assert scoring.passes_prefilter(trap, _product(session))
+
+
+def test_zmena_promptu_zneplatni_skore(session, monkeypatch):
+    trap = _trap(session)
+    rev = scoring.criteria_rev(trap)
+    monkeypatch.setattr(scoring, "PROMPT_REV", "test-jina-verze")
+    assert scoring.criteria_rev(trap) != rev
+
+
+def test_rucni_verdikt(client, monkeypatch):
+    with Session(db._engine) as s:
+        product = _product(s)
+        s.commit()
+        pid = product.id
+    r = client.put(f"/api/products/{pid}/verdict", json={"verdict": "dislike"})
+    assert r.status_code == 200
+    rows = client.get("/api/discovery/products").json()
+    assert rows[0]["verdict"] == "dislike"
+    # návrat na neutral verdikt z výpisu zmizí
+    client.put(f"/api/products/{pid}/verdict", json={"verdict": "neutral"})
+    assert client.get("/api/discovery/products").json()[0]["verdict"] is None
+    assert client.put("/api/products/999/verdict",
+                      json={"verdict": "like"}).status_code == 404
+
+
+def test_migrace_prida_prefilter(monkeypatch, tmp_path):
+    """Simulace staré DB bez sloupce prefilter — ensure_ready ho doplní."""
+    import sqlalchemy as sa
+
+    url = f"sqlite:///{tmp_path}/old.db"
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE criteria (id INTEGER PRIMARY KEY, name VARCHAR(120))"
+        ))
+    monkeypatch.setattr(db, "_engine", engine)
+    monkeypatch.setattr(db, "_ready", False)
+    assert db.ensure_ready()
+    cols = {c["name"] for c in sa.inspect(engine).get_columns("criteria")}
+    assert "prefilter" in cols

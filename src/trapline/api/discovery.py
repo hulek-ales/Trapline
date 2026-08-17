@@ -11,7 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import discovery, grouping
-from ..models import Criteria, CriteriaMatch, FeedSource, PriceHistory, Product
+from ..models import (
+    Criteria,
+    CriteriaMatch,
+    FeedSource,
+    PriceHistory,
+    Product,
+    UserFeedback,
+)
 from .criteria import get_db
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
@@ -131,6 +138,8 @@ class ProductOut(BaseModel):
     price_max: float | None
     urls: list[str]
     image: str | None = None
+    #: Ruční verdikt uživatele (like/dislike/owned) — přebíjí skóre.
+    verdict: str | None = None
     matches: list[MatchOut] = []
     #: Barevné varianty sloučené do jednoho řádku (názvy). 1 = bez variant.
     variant_count: int = 1
@@ -145,6 +154,11 @@ def list_products(session: DbSession, limit: int = 200):
         select(Product).order_by(Product.id.desc()).limit(limit)
     ).all()
     trap_names = dict(session.execute(select(Criteria.id, Criteria.name)).all())
+    verdicts = {
+        fb.product_id: fb.verdict.value
+        for fb in session.scalars(select(UserFeedback))
+        if fb.verdict.value != "neutral"
+    }
     matches_by_product: dict[int, list[MatchOut]] = {}
     for m in session.scalars(select(CriteriaMatch)):
         matches_by_product.setdefault(m.product_id, []).append(
@@ -187,6 +201,7 @@ def list_products(session: DbSession, limit: int = 200):
                 price_max=max(prices) if prices else None,
                 urls=urls,
                 image=(product.specs or {}).get("_img"),
+                verdict=verdicts.get(product.id),
                 matches=matches_by_product.get(product.id, []),
             )
         )
@@ -236,6 +251,7 @@ def _group_families(
                 price_max=max(prices) if prices else None,
                 urls=[u for m in members for u in m.urls],
                 image=next((m.image for m in members if m.image), None),
+                verdict=next((m.verdict for m in members if m.verdict), None),
                 matches=sorted(best.values(), key=lambda x: x.criteria_id),
                 variant_count=len(members),
                 variant_titles=[m.title for m in members],

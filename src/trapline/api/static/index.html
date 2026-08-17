@@ -126,7 +126,7 @@
     </label>
     <p class="empty" id="td-empty" hidden>Žádné výsledky — spusť skóring na hlavní stránce.</p>
     <table id="td-table" hidden>
-      <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th></tr></thead>
+      <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th><th></th></tr></thead>
       <tbody id="td-body"></tbody>
     </table>
   </section>
@@ -151,6 +151,7 @@
     <form class="actions" id="trap-form">
       <input type="text" id="trap-name" placeholder="Název pasti" required>
       <input type="text" id="trap-terms" placeholder="požadavky, oddělené, čárkou" style="min-width:18rem">
+      <input type="text" id="trap-prefilter" placeholder="předfiltr katalogu (např. chladni, lednice)" style="min-width:14rem">
       <input type="number" id="trap-budget" placeholder="Budget Kč" min="1" style="width:8rem">
       <button type="submit" id="trap-submit">Přidat past</button>
       <button type="button" class="link" id="trap-cancel" hidden>zrušit úpravu</button>
@@ -265,6 +266,10 @@ const api = {
   scoringStatus: () => fetch("/api/scoring/status").then(ok),
   ollama:        () => fetch("/api/scoring/ollama").then(ok),
   syslog:        () => fetch("/api/system/log?limit=80").then(ok),
+  setVerdict: (id, v) => fetch(`/api/products/${id}/verdict`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ verdict: v }),
+  }).then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -352,12 +357,20 @@ async function renderTrapDetail(id) {
     const bd = (m.breakdown || []).map((b) =>
       `<div>${verdiktIkona(b.verdikt)} ${esc(b.pozadavek)}${b.pozn ? ` <span class="unk">— ${esc(b.pozn)}</span>` : ""}</div>`
     ).join("");
-    return `<tr>
+    const v = p.verdict;
+    const stav = v === "dislike" ? ' <span class="no">vyřazeno ručně</span>'
+      : v === "like" ? ' <span class="ok2">potvrzeno ručně</span>'
+      : v === "owned" ? ' <span class="unk">koupeno</span>' : "";
+    return `<tr data-pid="${p.id}" class="${v === "dislike" ? "inactive" : ""}">
       <td>${img}</td>
-      <td>${esc(p.title)}${link}${p.variant_count > 1 ? `<div class="variants">${p.variant_count} varianty</div>` : ""}</td>
+      <td>${esc(p.title)}${link}${stav}${p.variant_count > 1 ? `<div class="variants">${p.variant_count} varianty</div>` : ""}</td>
       <td class="num">${esc(cena)}</td>
       <td><span class="badge ${m.relevant ? "rel" : ""}">${Math.round(m.score)}${m.relevant ? " ✓" : ""}</span></td>
       <td class="bd">${bd}</td>
+      <td>
+        <button class="link" data-v="like" title="potvrdit — přebije skóre">👍</button>
+        <button class="link" data-v="dislike" title="vyřadit — přebije skóre">👎</button>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -372,6 +385,21 @@ function route() {
 window.addEventListener("hashchange", route);
 $("td-back").onclick = () => { location.hash = ""; };
 $("td-only-rel").onchange = route;
+
+$("td-body").onclick = async (e) => {
+  const btn = e.target.closest("button[data-v]");
+  if (!btn) return;
+  const tr = btn.closest("tr");
+  const pid = Number(tr.dataset.pid);
+  // druhé kliknutí na stejný verdikt ho vrací na neutral
+  const current = tr.classList.contains("inactive") ? "dislike"
+    : tr.innerHTML.includes("potvrzeno ručně") ? "like" : null;
+  const v = current === btn.dataset.v ? "neutral" : btn.dataset.v;
+  btn.disabled = true;
+  try { await api.setVerdict(pid, v); route(); }
+  catch { /* překreslí se příště */ }
+  finally { btn.disabled = false; }
+};
 
 function fmtProc(st) {
   if (st.running) return "běží — " + (st.log.length ? st.log[st.log.length - 1] : "…");
@@ -596,6 +624,7 @@ function setTrapEditMode(trap) {
   $("trap-cancel").hidden = !trap;
   $("trap-name").value = trap ? trap.name : "";
   $("trap-terms").value = trap ? (trap.query_terms || []).join(", ") : "";
+  $("trap-prefilter").value = trap ? (trap.prefilter || "") : "";
   $("trap-budget").value = trap && trap.budget_max ? trap.budget_max : "";
   if (trap) $("trap-name").focus();
 }
@@ -631,6 +660,7 @@ $("trap-form").onsubmit = async (e) => {
   const t = {
     name: $("trap-name").value.trim(),
     query_terms: $("trap-terms").value.split(",").map((x) => x.trim()).filter(Boolean),
+    prefilter: $("trap-prefilter").value.trim(),
   };
   const budget = Number($("trap-budget").value);
   // U editace se prázdný budget musí poslat jako null, jinak by nešel zrušit.

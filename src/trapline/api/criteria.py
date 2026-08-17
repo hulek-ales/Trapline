@@ -33,6 +33,7 @@ def get_db():
 class CriteriaIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     query_terms: list[str] = []
+    prefilter: str = Field(default="", max_length=500)
     hard: dict = {}
     soft: dict = {}
     budget_max: float | None = Field(default=None, gt=0)
@@ -42,6 +43,7 @@ class CriteriaIn(BaseModel):
 class CriteriaPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     query_terms: list[str] | None = None
+    prefilter: str | None = Field(default=None, max_length=500)
     hard: dict | None = None
     soft: dict | None = None
     budget_max: float | None = Field(default=None, gt=0)
