@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,11 +29,10 @@ def ollama_status():
         models = llm.available_models()
     except Exception as exc:  # noqa: BLE001
         return {**out, "reachable": False, "error": str(exc)}
-    running = []
-    try:
+    running: list[dict] = []
+    # starší Ollama /api/ps nemusí mít — diagnostika bez něj pořád funguje
+    with contextlib.suppress(Exception):
         running = llm.running_models()
-    except Exception:  # noqa: BLE001 — starší Ollama /api/ps nemusí mít
-        pass
     return {
         **out,
         "reachable": True,
