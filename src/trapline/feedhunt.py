@@ -117,6 +117,17 @@ def search_domains(queries: list[str]) -> list[str]:
                 )
                 resp.raise_for_status()
                 results = resp.json().get("results", [])
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 403:
+                    _note(
+                        "SearXNG odmítá JSON API (403). V settings.yml "
+                        "SearXNG povol formát json:  search: → formats: "
+                        "[html, json]  — a restartuj ho. Případně vypni/"
+                        "povol limiter pro LAN."
+                    )
+                    return []
+                _note(f"hledání „{query}“ selhalo: {exc}")
+                continue
             except Exception as exc:  # noqa: BLE001
                 _note(f"hledání „{query}“ selhalo: {exc}")
                 continue
