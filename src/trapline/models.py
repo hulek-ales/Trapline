@@ -37,6 +37,11 @@ class Base(DeclarativeBase):
     pass
 
 
+#: SQLite autoinkrementuje jen INTEGER PRIMARY KEY — varianta drží BIGINT na
+#: MariaDB a testům na SQLite nechá funkční autoincrement.
+BigIntPK = BigInteger().with_variant(Integer, "sqlite")
+
+
 # --------------------------------------------------------------------------- #
 # Enumy
 # --------------------------------------------------------------------------- #
@@ -176,7 +181,7 @@ class PriceHistory(Base):
     __tablename__ = "price_history"
     __table_args__ = (Index("ix_ph_offer_ts", "offer_id", "ts"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id"))
     ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     price: Mapped[float] = mapped_column(Float)
@@ -202,7 +207,7 @@ class Listing(Base):
         Index("ix_listings_seen", "source", "first_seen"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     source: Mapped[Source] = mapped_column(Enum(Source))
     ext_id: Mapped[str] = mapped_column(String(120))
     url: Mapped[str] = mapped_column(String(1024))
@@ -236,7 +241,7 @@ class ListingMatch(Base):
     __tablename__ = "listing_matches"
     __table_args__ = (UniqueConstraint("listing_id", name="uq_lm_listing"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
     product_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id"), index=True
@@ -264,7 +269,7 @@ class PriceReference(Base):
     __tablename__ = "price_reference"
     __table_args__ = (Index("ix_pr_product_ts", "product_id", "ts"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     ts: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -280,6 +285,57 @@ class PriceReference(Base):
     used_reference: Mapped[float | None] = mapped_column(Float)
     #: 0..1, jak moc reference stojí na datech vs. na prioru.
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class FeedSource(Base):
+    """Eshop, jehož Heureka XML feed discovery stahuje (ADR-0003).
+
+    ``category_filter``: čárkou oddělené podřetězce; položka feedu projde,
+    když aspoň jeden matchne v CATEGORYTEXT nebo PRODUCTNAME (bez ohledu na
+    velikost písmen). Prázdné = projde všechno.
+    """
+
+    __tablename__ = "feed_sources"
+    __table_args__ = (UniqueConstraint("url", name="uq_feed_sources_url"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(String(1024))
+    category_filter: Mapped[str] = mapped_column(String(500), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    last_run: Mapped[datetime | None] = mapped_column(DateTime)
+    #: Krátké shrnutí posledního běhu ("ok, 15 položek" / text chyby).
+    last_status: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class CriteriaMatch(Base):
+    """Výsledek LLM skóringu produktu proti pasti (ADR-0003).
+
+    Automatický verdikt; ruční přebití uživatelem žije v UserFeedback a má
+    vždy přednost. ``criteria_rev`` drží hash zadání pasti v době vyhodnocení,
+    aby šlo poznat zastaralé skóry bez porovnávání textů.
+    """
+
+    __tablename__ = "criteria_matches"
+    __table_args__ = (
+        UniqueConstraint("criteria_id", "product_id", name="uq_cm_pair"),
+        Index("ix_cm_criteria_score", "criteria_id", "score"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
+    criteria_id: Mapped[int] = mapped_column(ForeignKey("criteria.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+
+    #: 0–100, jak moc produkt vyhovuje zadání.
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    relevant: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Rozpad per požadavek: [{"pozadavek": "...", "splneno": true, "pozn": "..."}]
+    breakdown: Mapped[list] = mapped_column(JSON, default=list)
+    model_used: Mapped[str | None] = mapped_column(String(80))
+    criteria_rev: Mapped[str | None] = mapped_column(String(64))
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class UserFeedback(Base):
@@ -305,7 +361,7 @@ class Alert(Base):
         Index("ix_alerts_sent", "sent_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
     #: např. "listing:sbazar:12345" nebo "offer:alza:XYZ:4990"
     dedup_key: Mapped[str] = mapped_column(String(255))
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
