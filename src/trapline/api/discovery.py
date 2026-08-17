@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import discovery, grouping
+from .. import discovery, feedhunt, grouping
+from ..config import settings
 from ..models import (
     Criteria,
     CriteriaMatch,
@@ -115,6 +116,27 @@ def run(session: DbSession):
 @router.get("/status")
 def run_status():
     return discovery.status()
+
+
+# --- automatické hledání zdrojů (feedhunt) ---------------------------------
+
+@router.post("/hunt/{criteria_id}", status_code=202)
+def hunt(criteria_id: int, session: DbSession):
+    """Najdi nové zdroje pro past: SearXNG → domény → oťukání feedů.
+    Nálezy se zakládají jako vypnuté návrhy v sekci Zdroje."""
+    if not settings.searxng_url:
+        raise HTTPException(400, "SEARXNG_URL není nastavené.")
+    trap = session.get(Criteria, criteria_id)
+    if trap is None:
+        raise HTTPException(404, "Past neexistuje.")
+    if not feedhunt.start(criteria_id):
+        raise HTTPException(409, "Hledání zdrojů už běží.")
+    return {"message": f"Hledám obchody pro past „{trap.name}“…"}
+
+
+@router.get("/hunt/status")
+def hunt_status():
+    return feedhunt.status()
 
 
 # --- produkty --------------------------------------------------------------
