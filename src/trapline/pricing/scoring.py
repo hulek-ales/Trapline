@@ -120,7 +120,8 @@ def score_deal(
     if ratio_new is not None and ratio_new > MAX_RATIO_VS_NEW:
         return DealScore(
             score, total, ratio_used, ratio_new, penalty, False,
-            f"nový kus je dostupný za srovnatelnou cenu ({ratio_new:.0%} z retail_best)",
+            f"nový kus je dostupný za srovnatelnou cenu "
+            f"({ratio_new:.0%} z retail_best)",
         )
     if score <= 0:
         return DealScore(

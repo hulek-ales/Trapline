@@ -98,7 +98,7 @@ def weighted_median(values: list[float], weights: list[float]) -> float:
     if len(values) != len(weights):
         raise ValueError("values a weights musí mít stejnou délku")
 
-    pairs = sorted(zip(values, weights), key=lambda p: p[0])
+    pairs = sorted(zip(values, weights, strict=True), key=lambda p: p[0])
     total = sum(w for _, w in pairs)
     if total <= 0:
         raise ValueError("součet vah musí být kladný")
