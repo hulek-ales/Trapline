@@ -11,11 +11,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .. import db
-from ..models import Criteria
+from ..models import Criteria, CriteriaMatch
 
 router = APIRouter(prefix="/api/criteria", tags=["criteria"])
 
@@ -93,5 +93,10 @@ def update_criteria(criteria_id: int, payload: CriteriaPatch, session: DbSession
 @router.delete("/{criteria_id}", status_code=204)
 def delete_criteria(criteria_id: int, session: DbSession):
     row = _get_or_404(session, criteria_id)
+    # výsledky skóringu drží FK na past — bez tohohle mazání spadne na
+    # MariaDB (SQLite FK v testech nevynucuje, proto fixture zapíná pragma)
+    session.execute(
+        delete(CriteriaMatch).where(CriteriaMatch.criteria_id == criteria_id)
+    )
     session.delete(row)
     session.commit()
