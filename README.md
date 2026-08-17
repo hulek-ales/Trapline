@@ -42,7 +42,9 @@ předchozímu snapshotu), ne jen nové položky.
 - [x] Datové schéma (`models.py`)
 - [x] Referenční ceny — vážený medián, winsorizace, shrinkage (`pricing/reference.py`)
 - [x] Deal scoring — pickup cost, red flags, blokace proti ceně nového (`pricing/scoring.py`)
-- [ ] JSON-LD extraktor pro retail
+- [x] Discovery: Heureka XML feedy → katalog produktů s parametry (`discovery.py`, ADR-0003)
+- [ ] LLM skóring produktů proti pastem (`criteria_matches` schéma připraveno)
+- [ ] JSON-LD extraktor pro retail (velké eshopy bez feedů)
 - [ ] Sbazar / Bazoš crawler + diff pro `gone_at`
 - [ ] Allegro REST API klient (OAuth2 client_credentials)
 - [ ] LLM klasifikace inzerátů (qwen3:4b, structured output)

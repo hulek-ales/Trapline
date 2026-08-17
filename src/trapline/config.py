@@ -44,6 +44,12 @@ class Settings:
         self.ntfy_url: str = _env("NTFY_URL", "https://ntfy.sh/")
         self.ntfy_topic: str = _env("NTFY_TOPIC")
 
+        # --- Crawler etiketa ---------------------------------------------
+        self.user_agent: str = _env(
+            "USER_AGENT", "Trapline/0.1 (+osobni cenovy monitor)"
+        )
+        self.request_delay_s: float = float(_env("REQUEST_DELAY_S", "2.5"))
+
         # --- Zabezpečení GUI ---------------------------------------------
         #: Jedno sdílené heslo. Prázdné = GUI i API jsou otevřené.
         self.app_password: str = _env("APP_PASSWORD")

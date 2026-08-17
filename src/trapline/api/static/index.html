@@ -110,6 +110,40 @@
     </form>
   </section>
 
+  <section id="catalog" hidden>
+    <div class="row">
+      <h2>Katalog produktů</h2>
+      <span class="meta" id="catalog-count"></span>
+    </div>
+    <p class="subject">Modely nalezené discovery během — parametry, rozpětí cen, odkazy.</p>
+    <p class="empty" id="catalog-empty" hidden>Zatím prázdný. Přidej zdroj feedu níž a spusť discovery.</p>
+    <table id="catalog-table" hidden>
+      <thead><tr><th>Produkt</th><th>Značka</th><th>Cena</th><th>Obchody</th><th>Parametry</th></tr></thead>
+      <tbody id="catalog-body"></tbody>
+    </table>
+    <div class="actions">
+      <button id="btn-discover">Spustit discovery</button>
+      <span class="msg" id="discovery-msg"></span>
+    </div>
+  </section>
+
+  <section id="sources" hidden>
+    <div class="row"><h2>Zdroje feedů</h2><span class="meta" id="sources-count"></span></div>
+    <p class="subject">Heureka XML feedy eshopů, ze kterých se staví katalog.</p>
+    <p class="empty" id="sources-empty" hidden>Žádný zdroj. Přidej první níž.</p>
+    <table id="sources-table" hidden>
+      <thead><tr><th>Název</th><th>Filtr kategorií</th><th>Poslední běh</th><th></th></tr></thead>
+      <tbody id="sources-body"></tbody>
+    </table>
+    <form class="actions" id="source-form">
+      <input type="text" id="src-name" placeholder="Název (např. Bestberg)" required>
+      <input type="text" id="src-url" placeholder="https://…/heureka/export/products.xml" required style="min-width:20rem">
+      <input type="text" id="src-filter" placeholder="filtr: chlad, lednice, mrazni">
+      <button type="submit">Přidat zdroj</button>
+      <span class="msg" id="sources-msg"></span>
+    </form>
+  </section>
+
   <!-- Panel se zobrazí jen když je UPDATE_ENABLED=true, stejně jako v Kuchařce. -->
   <section id="system" hidden>
     <div class="row">
@@ -157,6 +191,16 @@ const api = {
   trapDelete: (id) => fetch(`/api/criteria/${id}`, { method: "DELETE" })
     .then((r) => { if (r.status === 401) { showLogin(); throw new Error("401"); }
                    if (!r.ok && r.status !== 204) throw new Error(r.status); }),
+  sources:   () => fetch("/api/discovery/sources").then(ok),
+  sourceAdd: (v) => fetch("/api/discovery/sources", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v),
+  }).then(ok),
+  sourceDelete: (id) => fetch(`/api/discovery/sources/${id}`, { method: "DELETE" })
+    .then((r) => { if (r.status === 401) { showLogin(); throw new Error("401"); }
+                   if (!r.ok && r.status !== 204) throw new Error(r.status); }),
+  discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
+  discoveryStatus: () => fetch("/api/discovery/status").then(ok),
+  products: () => fetch("/api/discovery/products").then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -196,10 +240,107 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  $("system").hidden = true;
-  $("traps").hidden = true;
+  for (const id of ["system", "traps", "catalog", "sources"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
 }
+
+function fmtSpecs(specs) {
+  const parts = [];
+  for (const [k, v] of Object.entries(specs || {})) {
+    parts.push(`${k}: ${Array.isArray(v) ? v.join("/") : v}`);
+  }
+  return parts.join(" · ");
+}
+
+async function loadCatalog() {
+  let rows;
+  try { rows = await api.products(); } catch { return; }
+  $("catalog").hidden = false;
+  $("catalog-count").textContent = rows.length || "";
+  $("catalog-empty").hidden = rows.length > 0;
+  $("catalog-table").hidden = rows.length === 0;
+  $("catalog-body").innerHTML = rows.map((p) => {
+    const price = p.price_min == null ? "—"
+      : p.price_min === p.price_max ? `${p.price_min} Kč`
+      : `${p.price_min}–${p.price_max} Kč`;
+    const link = p.urls.length ? ` <a href="${esc(p.urls[0])}" target="_blank" rel="noopener">↗</a>` : "";
+    return `<tr>
+      <td>${esc(p.title)}${link}</td>
+      <td>${esc(p.brand)}</td>
+      <td class="num">${esc(price)}</td>
+      <td class="num">${p.offers}</td>
+      <td style="font-size:.78rem;opacity:.65">${esc(fmtSpecs(p.specs)).slice(0, 300)}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadSources() {
+  let rows;
+  try { rows = await api.sources(); } catch { return; }
+  $("sources").hidden = false;
+  $("sources-count").textContent = rows.length || "";
+  $("sources-empty").hidden = rows.length > 0;
+  $("sources-table").hidden = rows.length === 0;
+  $("sources-body").innerHTML = rows.map((s) => `
+    <tr data-id="${s.id}" class="${s.enabled ? "" : "inactive"}">
+      <td>${esc(s.name)}</td>
+      <td style="font-size:.8rem">${esc(s.category_filter || "—")}</td>
+      <td style="font-size:.8rem;opacity:.65">${esc(s.last_status || "zatím neběžel")}</td>
+      <td><button class="link" data-act="del">smazat</button></td>
+    </tr>`).join("");
+}
+
+$("sources-body").onclick = async (e) => {
+  const btn = e.target.closest("button[data-act=del]");
+  if (!btn) return;
+  if (!confirm("Smazat zdroj feedu?")) return;
+  try {
+    await api.sourceDelete(Number(btn.closest("tr").dataset.id));
+    await loadSources();
+  } catch { $("sources-msg").textContent = "Smazání selhalo."; }
+};
+
+$("source-form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("sources-msg").textContent = "";
+  try {
+    await api.sourceAdd({
+      name: $("src-name").value.trim(),
+      url: $("src-url").value.trim(),
+      category_filter: $("src-filter").value.trim(),
+    });
+    $("source-form").reset();
+    await loadSources();
+  } catch (err) {
+    $("sources-msg").textContent = err.message === "409"
+      ? "Zdroj s tímhle URL už existuje." : "Uložení selhalo.";
+  }
+};
+
+$("btn-discover").onclick = async () => {
+  $("btn-discover").disabled = true;
+  $("discovery-msg").textContent = "Spouštím…";
+  try {
+    await api.discoveryRun();
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.discoveryStatus();
+        $("discovery-msg").textContent = st.log.length ? st.log[st.log.length - 1] : "běží…";
+        if (!st.running) {
+          clearInterval(poll);
+          $("btn-discover").disabled = false;
+          await loadCatalog();
+          await loadSources();
+        }
+      } catch { /* přechodná chyba */ }
+    }, 2000);
+  } catch (err) {
+    $("discovery-msg").textContent = err.message === "400"
+      ? "Nejdřív přidej zdroj feedu." : err.message === "409"
+      ? "Discovery už běží." : "Spuštění selhalo.";
+    $("btn-discover").disabled = false;
+  }
+};
 
 function esc(s) {
   const d = document.createElement("span");
@@ -278,6 +419,8 @@ async function boot() {
   $("btn-logout").hidden = !st.required;
   loadVersion();
   loadTraps();
+  loadCatalog();
+  loadSources();
 }
 
 $("login-form").onsubmit = async (e) => {
