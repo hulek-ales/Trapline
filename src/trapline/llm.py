@@ -80,6 +80,11 @@ def chat_json(
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
+                # think:false — thinking modely jinak spálí celý výstupní
+                # rozpočet na přemýšlení a content zůstane prázdný při
+                # HTTP 200 (potvrzený Ollama bug, viz Kuchařka ollamachat.py;
+                # přesně tenhle příznak ukázal ostrý běh na gemma4)
+                "think": False,
                 "format": schema,
                 # num_predict: bez explicitního stropu se delší JSON přes
                 # proxy usekne v půlce ("Unterminated string" z ostrého běhu)
