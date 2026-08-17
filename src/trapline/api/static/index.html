@@ -84,6 +84,11 @@
   .loglist .warn { color: var(--warn); }
   .procrow { display: flex; gap: .6rem; align-items: baseline; font-size: .88rem; margin-bottom: .3rem; }
   .procrow b { min-width: 6.5rem; display: inline-block; }
+  .bd { font-size: .82rem; line-height: 1.6; }
+  .bd .ok2 { color: var(--ok); }
+  .bd .no { color: var(--warn); }
+  .bd .unk { opacity: .55; }
+  a.traplink { color: inherit; }
   .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--line); }
   .dot.on { background: var(--ok); animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
@@ -110,12 +115,32 @@
     </form>
   </section>
 
+  <section id="trap-detail" hidden>
+    <div class="row">
+      <h2 id="td-title">Past</h2>
+      <button class="link" id="td-back">← zpět na přehled</button>
+    </div>
+    <p class="subject" id="td-terms"></p>
+    <label class="subject" style="display:block;margin:.3rem 0 .6rem">
+      <input type="checkbox" id="td-only-rel"> jen relevantní
+    </label>
+    <p class="empty" id="td-empty" hidden>Žádné výsledky — spusť skóring na hlavní stránce.</p>
+    <table id="td-table" hidden>
+      <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th></tr></thead>
+      <tbody id="td-body"></tbody>
+    </table>
+  </section>
+
   <section id="traps" hidden>
     <div class="row">
       <h2>Pasti</h2>
       <span class="meta" id="traps-count"></span>
     </div>
-    <p class="subject">Kritéria, která agent obchází a hlídá pro ně nabídky.</p>
+    <p class="subject">Kritéria, která agent obchází a hlídá pro ně nabídky.
+      Kliknutím na název otevřeš výsledky pasti.</p>
+    <label class="subject" style="display:block;margin:.2rem 0 .5rem">
+      <input type="checkbox" id="traps-hide-off"> skrýt vypnuté
+    </label>
     <p class="empty" id="traps-empty" hidden>Zatím žádné pasti. Přidej první níž.</p>
     <table id="traps-table" hidden>
       <thead>
@@ -279,7 +304,7 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "catalog", "sources", "procs"]) $(id).hidden = true;
+  for (const id of ["system", "traps", "catalog", "sources", "procs", "trap-detail"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
 }
 
@@ -291,6 +316,62 @@ function fmtSpecs(specs) {
   }
   return parts.join(" · ");
 }
+
+const SECTIONS = ["traps", "catalog", "sources", "procs", "system"];
+
+function verdiktIkona(v) {
+  return v === "splneno" ? '<span class="ok2">✓</span>'
+    : v === "nesplneno" ? '<span class="no">✗</span>' : '<span class="unk">?</span>';
+}
+
+async function renderTrapDetail(id) {
+  let traps, products;
+  try {
+    [traps, products] = await Promise.all([api.traps(), api.products()]);
+  } catch { return; }
+  const trap = traps.find((t) => t.id === id);
+  if (!trap) { location.hash = ""; return; }
+  for (const sec of SECTIONS) $(sec).hidden = true;
+  $("trap-detail").hidden = false;
+  $("td-title").textContent = `Past: ${trap.name}${trap.active ? "" : " (vypnutá)"}`;
+  $("td-terms").textContent = (trap.query_terms || []).join(" · ")
+    + (trap.budget_max ? ` · budget ${trap.budget_max} Kč` : "");
+
+  const onlyRel = $("td-only-rel").checked;
+  const rows = products
+    .map((p) => ({ p, m: (p.matches || []).find((m) => m.criteria_id === id) }))
+    .filter((r) => r.m && (!onlyRel || r.m.relevant))
+    .sort((a, b) => b.m.score - a.m.score);
+  $("td-empty").hidden = rows.length > 0;
+  $("td-table").hidden = rows.length === 0;
+  $("td-body").innerHTML = rows.map(({ p, m }) => {
+    const img = p.image ? `<img class="thumb" loading="lazy" src="${esc(p.image)}" alt="">` : "";
+    const link = p.urls.length ? ` <a href="${esc(p.urls[0])}" target="_blank" rel="noopener">↗</a>` : "";
+    const cena = p.price_min == null ? "—"
+      : p.price_min === p.price_max ? `${p.price_min} Kč` : `${p.price_min}–${p.price_max} Kč`;
+    const bd = (m.breakdown || []).map((b) =>
+      `<div>${verdiktIkona(b.verdikt)} ${esc(b.pozadavek)}${b.pozn ? ` <span class="unk">— ${esc(b.pozn)}</span>` : ""}</div>`
+    ).join("");
+    return `<tr>
+      <td>${img}</td>
+      <td>${esc(p.title)}${link}${p.variant_count > 1 ? `<div class="variants">${p.variant_count} varianty</div>` : ""}</td>
+      <td class="num">${esc(cena)}</td>
+      <td><span class="badge ${m.relevant ? "rel" : ""}">${Math.round(m.score)}${m.relevant ? " ✓" : ""}</span></td>
+      <td class="bd">${bd}</td>
+    </tr>`;
+  }).join("");
+}
+
+function route() {
+  const m = location.hash.match(/^#past\/(\d+)$/);
+  if (m) { renderTrapDetail(Number(m[1])); return; }
+  $("trap-detail").hidden = true;
+  boot();
+}
+
+window.addEventListener("hashchange", route);
+$("td-back").onclick = () => { location.hash = ""; };
+$("td-only-rel").onchange = route;
 
 function fmtProc(st) {
   if (st.running) return "běží — " + (st.log.length ? st.log[st.log.length - 1] : "…");
@@ -489,6 +570,7 @@ async function loadTraps() {
     return;
   }
   trapRows = rows;
+  if ($("traps-hide-off").checked) rows = rows.filter((t) => t.active);
   $("traps").hidden = false;
   $("traps-msg").textContent = "";
   $("traps-count").textContent = rows.length || "";
@@ -496,7 +578,7 @@ async function loadTraps() {
   $("traps-table").hidden = rows.length === 0;
   $("traps-body").innerHTML = rows.map((t) => `
     <tr class="${t.active ? "" : "inactive"}" data-id="${t.id}">
-      <td>${esc(t.name)}</td>
+      <td><a class="traplink" href="#past/${t.id}">${esc(t.name)}</a></td>
       <td>${esc((t.query_terms || []).join(", "))}</td>
       <td class="num">${t.budget_max ? esc(t.budget_max) + " Kč" : "—"}</td>
       <td><button class="link" data-act="edit">upravit</button></td>
@@ -519,6 +601,7 @@ function setTrapEditMode(trap) {
 }
 
 $("trap-cancel").onclick = () => setTrapEditMode(null);
+$("traps-hide-off").onchange = loadTraps;
 
 $("traps-body").onclick = async (e) => {
   const btn = e.target.closest("button[data-act]");
@@ -591,6 +674,7 @@ $("login-form").onsubmit = async (e) => {
     await api.login($("password").value);
     $("password").value = "";
     await boot();
+    if (location.hash) route();
   } catch (err) {
     $("login-err").textContent =
       err.message === "429" ? "Příliš mnoho pokusů, zkus to za pár minut."
@@ -661,7 +745,7 @@ $("btn-update").onclick = async () => {
   }
 };
 
-boot();
+route();
 </script>
 </body>
 </html>

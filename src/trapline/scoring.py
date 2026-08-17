@@ -66,7 +66,8 @@ _SYSTEM = (
     "Využívej obecné znalosti o typu produktu (pasivní chladicí box nemá "
     "kompresor ani napájení, takže napájecí požadavky nesplňuje). Když data "
     "chybí a nejde to odvodit ani z typu produktu, dej nelze_urcit.\n"
-    "Vrať požadavky ve stejném pořadí, poznámky piš česky a stručně."
+    "Vrať požadavky ve stejném pořadí. Poznámky piš česky, drž je pod 15 "
+    "slov a nepoužívej v nich uvozovky ani apostrofy."
 )
 
 _lock = threading.Lock()

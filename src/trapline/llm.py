@@ -68,6 +68,9 @@ def chat_json(
     model = model or settings.llm_main
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
+        # Při teplotě 0 je model deterministický — nevalidní odpověď by se
+        # opakovala bajt po bajtu stejně. Retry proto jede s teplotou.
+        temperature = 0 if attempt == 0 else 0.4
         resp = httpx.post(
             f"{_base()}/api/chat",
             json={
@@ -80,7 +83,7 @@ def chat_json(
                 "format": schema,
                 # num_predict: bez explicitního stropu se delší JSON přes
                 # proxy usekne v půlce ("Unterminated string" z ostrého běhu)
-                "options": {"temperature": 0, "num_predict": 4096},
+                "options": {"temperature": temperature, "num_predict": 4096},
             },
             timeout=timeout,
         )
@@ -90,5 +93,9 @@ def chat_json(
             return parse_content(content)
         except ValueError as exc:
             last_exc = exc
-            log.warning("pokus %d: %s", attempt + 1, exc)
+            # syrová odpověď do logu — bez ní se vadný výstup nedá diagnostikovat
+            log.warning(
+                "pokus %d selhal (%s); odpověď modelu: %r",
+                attempt + 1, exc, content[:400],
+            )
     raise last_exc  # type: ignore[misc]
