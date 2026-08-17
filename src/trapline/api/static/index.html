@@ -162,20 +162,15 @@
   <section id="catalog" hidden>
     <div class="row">
       <h2>Katalog produktů</h2>
-      <span class="meta" id="catalog-count"></span>
+      <button class="link" id="catalog-back">← zpět na přehled</button>
     </div>
-    <p class="subject">Modely nalezené discovery během — parametry, rozpětí cen, odkazy.</p>
+    <p class="subject">Všechny modely nalezené discovery — parametry, rozpětí cen, odkazy.
+      <span class="meta" id="catalog-count"></span></p>
     <p class="empty" id="catalog-empty" hidden>Zatím prázdný. Přidej zdroj feedu níž a spusť discovery.</p>
     <table id="catalog-table" hidden>
       <thead><tr><th></th><th>Produkt</th><th>Značka</th><th>Cena</th><th>Skóre</th><th>Obchody</th><th>Parametry</th></tr></thead>
       <tbody id="catalog-body"></tbody>
     </table>
-    <div class="actions">
-      <button id="btn-discover">Spustit discovery</button>
-      <button id="btn-score">Spustit skóring</button>
-      <span class="msg" id="discovery-msg"></span>
-    </div>
-    <p class="hint" id="ollama-status"></p>
   </section>
 
   <section id="sources" hidden>
@@ -186,6 +181,11 @@
       <thead><tr><th>Název</th><th>Filtr kategorií</th><th>Poslední běh</th><th></th></tr></thead>
       <tbody id="sources-body"></tbody>
     </table>
+    <div class="actions" style="margin-bottom:.6rem">
+      <button id="btn-discover">Spustit discovery</button>
+      <button class="link" id="btn-catalog">celý katalog</button>
+      <span class="msg" id="discovery-msg"></span>
+    </div>
     <form class="actions" id="source-form">
       <input type="text" id="src-name" placeholder="Název (např. Bestberg)" required>
       <input type="text" id="src-url" placeholder="https://…/heureka/export/products.xml" required style="min-width:20rem">
@@ -202,6 +202,10 @@
     </div>
     <div class="procrow"><span class="dot" id="proc-disc-dot"></span><b>Discovery</b><span class="msg" id="proc-disc"></span></div>
     <div class="procrow"><span class="dot" id="proc-score-dot"></span><b>Skóring</b><span class="msg" id="proc-score"></span></div>
+    <div class="actions" style="margin:.4rem 0 .6rem">
+      <button id="btn-score">Spustit skóring</button>
+      <span class="hint" id="ollama-status" style="margin:0"></span>
+    </div>
     <div class="loglist" id="loglist">—</div>
   </section>
 
@@ -309,7 +313,7 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "catalog", "sources", "procs", "trap-detail"]) $(id).hidden = true;
+  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
 }
 
@@ -322,7 +326,7 @@ function fmtSpecs(specs) {
   return parts.join(" · ");
 }
 
-const SECTIONS = ["traps", "catalog", "sources", "procs", "system"];
+const SECTIONS = ["traps", "sources", "procs", "system"];
 
 function verdiktIkona(v) {
   return v === "splneno" ? '<span class="ok2">✓</span>'
@@ -337,6 +341,7 @@ async function renderTrapDetail(id) {
   const trap = traps.find((t) => t.id === id);
   if (!trap) { location.hash = ""; return; }
   for (const sec of SECTIONS) $(sec).hidden = true;
+  $("catalog").hidden = true;
   $("trap-detail").hidden = false;
   $("td-title").textContent = `Past: ${trap.name}${trap.active ? "" : " (vypnutá)"}`;
   $("td-terms").textContent = (trap.query_terms || []).join(" · ")
@@ -377,10 +382,25 @@ async function renderTrapDetail(id) {
 
 function route() {
   const m = location.hash.match(/^#past\/(\d+)$/);
-  if (m) { renderTrapDetail(Number(m[1])); return; }
+  if (m) {
+    $("catalog").hidden = true;
+    renderTrapDetail(Number(m[1]));
+    return;
+  }
+  if (location.hash === "#katalog") {
+    for (const sec of SECTIONS) $(sec).hidden = true;
+    $("trap-detail").hidden = true;
+    $("catalog").hidden = false;
+    loadCatalog();
+    return;
+  }
   $("trap-detail").hidden = true;
+  $("catalog").hidden = true;
   boot();
 }
+
+$("catalog-back").onclick = () => { location.hash = ""; };
+$("btn-catalog").onclick = () => { location.hash = "#katalog"; };
 
 window.addEventListener("hashchange", route);
 $("td-back").onclick = () => { location.hash = ""; };
@@ -434,7 +454,7 @@ async function loadProcs() {
   } else if (!running && procsTimer) {
     clearInterval(procsTimer);
     procsTimer = null;
-    loadCatalog();
+    route();  // překresli aktuální pohled (detail pasti / katalog)
   }
 }
 
@@ -466,7 +486,7 @@ $("btn-score").onclick = async () => {
         if (!st.running) {
           clearInterval(poll);
           $("btn-score").disabled = false;
-          await loadCatalog();
+          route();
         }
       } catch { /* přechodná chyba */ }
     }, 2000);
@@ -567,7 +587,6 @@ $("btn-discover").onclick = async () => {
         if (!st.running) {
           clearInterval(poll);
           $("btn-discover").disabled = false;
-          await loadCatalog();
           await loadSources();
         }
       } catch { /* přechodná chyba */ }
@@ -690,7 +709,6 @@ async function boot() {
   $("btn-logout").hidden = !st.required;
   loadVersion();
   loadTraps();
-  loadCatalog();
   loadSources();
   loadOllama();
   loadProcs();

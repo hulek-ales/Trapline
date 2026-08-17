@@ -244,3 +244,58 @@ def test_migrace_prida_prefilter(monkeypatch, tmp_path):
     assert db.ensure_ready()
     cols = {c["name"] for c in sa.inspect(engine).get_columns("criteria")}
     assert "prefilter" in cols
+
+
+def _seed_scored(client, monkeypatch, prefilter=""):
+    """Past + 2 produkty + skóre pro oba; vrací (trap_id, product_ids)."""
+    r = client.post("/api/criteria", json={
+        "name": "T", "query_terms": ["provoz na 12V"], "prefilter": prefilter,
+    })
+    tid = r.json()["id"]
+    with Session(db._engine) as s:
+        fridge = _product(s, title="Autochladnička BBPF-30A")
+        knife = _product(s, title="Zavírací nůž MAM")
+        trap = s.get(Criteria, tid)
+        monkeypatch.setattr(scoring, "_ask_llm", _fake_llm())
+        scoring.score_pair(s, trap, fridge)
+        scoring.score_pair(s, trap, knife)
+        s.commit()
+        return tid, (fridge.id, knife.id)
+
+
+def _match_count(tid):
+    with Session(db._engine) as s:
+        return s.query(CriteriaMatch).filter_by(criteria_id=tid).count()
+
+
+def test_zmena_zadani_vyhazi_vsechna_skore(client, monkeypatch):
+    monkeypatch.setattr(scoring, "start", lambda: True)  # nech běh na pokoji
+    tid, _ = _seed_scored(client, monkeypatch)
+    assert _match_count(tid) == 2
+    client.patch(f"/api/criteria/{tid}", json={"query_terms": ["provoz na 230V"]})
+    assert _match_count(tid) == 0
+
+
+def test_zuzeni_prefiltru_vyhazi_jen_nevyhovujici(client, monkeypatch):
+    monkeypatch.setattr(scoring, "start", lambda: True)
+    tid, (fridge_id, knife_id) = _seed_scored(client, monkeypatch)
+    client.patch(f"/api/criteria/{tid}", json={"prefilter": "chladni"})
+    with Session(db._engine) as s:
+        rows = s.query(CriteriaMatch).filter_by(criteria_id=tid).all()
+        assert [m.product_id for m in rows] == [fridge_id]  # nůž vypadl
+
+
+def test_pauza_skore_nemaze(client, monkeypatch):
+    monkeypatch.setattr(scoring, "start", lambda: True)
+    tid, _ = _seed_scored(client, monkeypatch)
+    client.patch(f"/api/criteria/{tid}", json={"active": False})
+    assert _match_count(tid) == 2  # historie zůstává (vypnutí = uložení)
+
+
+def test_zmena_zadani_spousti_preskorovani(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(scoring, "start", lambda: calls.append(1) or True)
+    monkeypatch.setattr(settings, "ollama_url", "http://test:1")
+    tid, _ = _seed_scored(client, monkeypatch)
+    client.patch(f"/api/criteria/{tid}", json={"query_terms": ["jiné"]})
+    assert calls  # skóring se nastartoval sám
