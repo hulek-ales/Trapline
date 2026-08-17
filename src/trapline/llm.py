@@ -78,7 +78,9 @@ def chat_json(
                 ],
                 "stream": False,
                 "format": schema,
-                "options": {"temperature": 0},
+                # num_predict: bez explicitního stropu se delší JSON přes
+                # proxy usekne v půlce ("Unterminated string" z ostrého běhu)
+                "options": {"temperature": 0, "num_predict": 4096},
             },
             timeout=timeout,
         )
