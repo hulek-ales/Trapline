@@ -127,3 +127,13 @@ def test_brute_force_se_zamkne(chranene):
     assert r.status_code == 429
     # Zámek platí i pro správné heslo – jinak by šel obejít hádáním dál.
     assert chranene.post("/api/auth/login", json={"password": HESLO}).status_code == 429
+
+
+def test_pwa_soubory_jsou_verejne(chranene):
+    """Manifest, service worker a ikony musí jít stáhnout bez přihlášení,
+    jinak Android appku nenainstaluje."""
+    for path in ("/manifest.json", "/sw.js", "/icon-192.png", "/favicon-32.png"):
+        assert chranene.get(path).status_code == 200, path
+    body = chranene.get("/manifest.json").json()
+    assert body["display"] == "standalone"
+    assert body["short_name"] == "Trapline"
