@@ -32,11 +32,19 @@ class FeedItem:
     ean: str | None = None
     manufacturer: str | None = None
     category: str | None = None
+    description: str | None = None
     params: dict = field(default_factory=dict)
 
 
 def _text(el: ET.Element | None) -> str:
     return (el.text or "").strip() if el is not None else ""
+
+
+def _strip_html(raw: str, limit: int = 1500) -> str:
+    """DESCRIPTION bývá HTML — pro LLM stačí čistý text, oříznutý."""
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
 
 
 def _price(raw: str) -> float | None:
@@ -78,6 +86,7 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
                 params[key] = val
 
         ean = _text(el.find("EAN"))
+        description = _strip_html(_text(el.find("DESCRIPTION")))
         items.append(
             FeedItem(
                 item_id=_text(el.find("ITEM_ID")) or url,
@@ -87,14 +96,15 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
                 ean=ean if re.fullmatch(r"\d{8,14}", ean) else None,
                 manufacturer=_text(el.find("MANUFACTURER")) or None,
                 category=_text(el.find("CATEGORYTEXT")) or None,
+                description=description or None,
                 params=params,
             )
         )
     return items
 
 
-def fetch(url: str) -> list[FeedItem]:
-    """Stáhne a naparsuje feed. Chyby (síť, XML) propadají volajícímu."""
+def fetch_raw(url: str) -> bytes:
+    """Stáhne syrový feed. Chyby (síť) propadají volajícímu."""
     with httpx.Client(
         headers={"User-Agent": settings.user_agent},
         timeout=120,
@@ -104,7 +114,12 @@ def fetch(url: str) -> list[FeedItem]:
         resp.raise_for_status()
         if len(resp.content) > MAX_BYTES:
             raise ValueError(f"feed přes {MAX_BYTES // 1024 // 1024} MB")
-        return parse(resp.content)
+        return resp.content
+
+
+def fetch(url: str) -> list[FeedItem]:
+    """Stáhne a naparsuje feed. Chyby (síť, XML) propadají volajícímu."""
+    return parse(fetch_raw(url))
 
 
 def matches_filter(item: FeedItem, category_filter: str) -> bool:

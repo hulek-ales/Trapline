@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import discovery
-from ..models import FeedSource, PriceHistory, Product
+from ..models import Criteria, CriteriaMatch, FeedSource, PriceHistory, Product
 from .criteria import get_db
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
@@ -112,6 +112,14 @@ def run_status():
 
 # --- produkty --------------------------------------------------------------
 
+class MatchOut(BaseModel):
+    criteria_id: int
+    criteria_name: str
+    score: float
+    relevant: bool
+    breakdown: list
+
+
 class ProductOut(BaseModel):
     id: int
     ean: str | None
@@ -122,6 +130,7 @@ class ProductOut(BaseModel):
     price_min: float | None
     price_max: float | None
     urls: list[str]
+    matches: list[MatchOut] = []
 
 
 @router.get("/products", response_model=list[ProductOut])
@@ -131,6 +140,18 @@ def list_products(session: DbSession, limit: int = 200):
     products = session.scalars(
         select(Product).order_by(Product.id.desc()).limit(limit)
     ).all()
+    trap_names = dict(session.execute(select(Criteria.id, Criteria.name)).all())
+    matches_by_product: dict[int, list[MatchOut]] = {}
+    for m in session.scalars(select(CriteriaMatch)):
+        matches_by_product.setdefault(m.product_id, []).append(
+            MatchOut(
+                criteria_id=m.criteria_id,
+                criteria_name=trap_names.get(m.criteria_id, "?"),
+                score=m.score,
+                relevant=m.relevant,
+                breakdown=m.breakdown or [],
+            )
+        )
     out: list[ProductOut] = []
     for product in products:
         prices: list[float] = []
@@ -158,6 +179,7 @@ def list_products(session: DbSession, limit: int = 200):
                 price_min=min(prices) if prices else None,
                 price_max=max(prices) if prices else None,
                 urls=urls,
+                matches=matches_by_product.get(product.id, []),
             )
         )
     return out
