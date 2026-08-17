@@ -55,6 +55,24 @@ def parse_content(content: str) -> dict:
         raise ValueError(f"odpověď modelu není JSON: {text[:200]!r}") from None
 
 
+def running_models(timeout: float = 5.0) -> list[dict]:
+    """Co právě běží na Ollama serveru (GET /api/ps) — název, velikost
+    a kolik z modelu je ve VRAM. size_vram < size = část na CPU."""
+    resp = httpx.get(f"{_base()}/api/ps", timeout=timeout)
+    resp.raise_for_status()
+    return [
+        {
+            "name": m.get("name"),
+            "size_mb": round(m.get("size", 0) / 1e6),
+            "vram_mb": round(m.get("size_vram", 0) / 1e6),
+            "vram_pct": round(
+                100 * m.get("size_vram", 0) / m["size"]
+            ) if m.get("size") else None,
+        }
+        for m in resp.json().get("models", [])
+    ]
+
+
 def chat_json(
     system: str,
     user: str,

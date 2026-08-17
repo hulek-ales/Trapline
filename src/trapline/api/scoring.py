@@ -28,11 +28,19 @@ def ollama_status():
         models = llm.available_models()
     except Exception as exc:  # noqa: BLE001
         return {**out, "reachable": False, "error": str(exc)}
+    running = []
+    try:
+        running = llm.running_models()
+    except Exception:  # noqa: BLE001 — starší Ollama /api/ps nemusí mít
+        pass
     return {
         **out,
         "reachable": True,
         "model_available": settings.llm_main in models,
         "models": models,
+        # co teď reálně sedí v paměti: vram_pct < 100 = část modelu na CPU
+        # = řádové zpomalení generování
+        "running": running,
     }
 
 

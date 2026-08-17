@@ -299,3 +299,15 @@ def test_zmena_zadani_spousti_preskorovani(client, monkeypatch):
     tid, _ = _seed_scored(client, monkeypatch)
     client.patch(f"/api/criteria/{tid}", json={"query_terms": ["jiné"]})
     assert calls  # skóring se nastartoval sám
+
+
+def test_ollama_diag_hlasi_bezici_modely(client, monkeypatch):
+    from trapline import llm
+
+    monkeypatch.setattr(settings, "ollama_url", "http://test:1")
+    monkeypatch.setattr(llm, "available_models", lambda: ["gemma4:12b"])
+    monkeypatch.setattr(llm, "running_models", lambda: [
+        {"name": "gemma4:12b", "size_mb": 12000, "vram_mb": 6000, "vram_pct": 50},
+    ])
+    body = client.get("/api/scoring/ollama").json()
+    assert body["running"][0]["vram_pct"] == 50  # půlka modelu na CPU
