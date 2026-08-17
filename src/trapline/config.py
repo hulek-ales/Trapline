@@ -49,6 +49,10 @@ class Settings:
             "USER_AGENT", "Trapline/0.1 (+osobni cenovy monitor)"
         )
         self.request_delay_s: float = float(_env("REQUEST_DELAY_S", "2.5"))
+        #: Kam gzipovat syrové odpovědi zdrojů kvůli zpětnému přeparsování
+        #: (ADR-0004). Prázdné = snapshoty vypnuté. Default je relativní
+        #: k CWD — v Dockeru /app/data/snapshots (volume, mimo git).
+        self.snapshot_dir: str = _env("SNAPSHOT_DIR", "data/snapshots")
 
         # --- Zabezpečení GUI ---------------------------------------------
         #: Jedno sdílené heslo. Prázdné = GUI i API jsou otevřené.

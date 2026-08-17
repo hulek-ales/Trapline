@@ -11,10 +11,12 @@ jednoduché, a při restartu se prostě spustí znovu.
 
 from __future__ import annotations
 
+import gzip
 import logging
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -114,8 +116,33 @@ def _upsert_offer(
     session.add(PriceHistory(offer_id=offer.id, price=item.price))
 
 
+#: Kolik snapshotů na zdroj držet, než se nejstarší smažou.
+SNAPSHOT_KEEP = 30
+
+
+def _save_snapshot(source: FeedSource, raw: bytes) -> None:
+    """Gzipni syrovou odpověď na disk (ADR-0004). Selhání discovery nezastaví."""
+    if not settings.snapshot_dir:
+        return
+    try:
+        directory = Path(settings.snapshot_dir) / str(source.id)
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        (directory / f"{stamp}.xml.gz").write_bytes(gzip.compress(raw))
+        for old in sorted(directory.glob("*.xml.gz"))[:-SNAPSHOT_KEEP]:
+            old.unlink()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("snapshot %s selhal: %s", source.name, exc)
+
+
+def _fetch_items(source: FeedSource) -> list[heureka_feed.FeedItem]:
+    raw = heureka_feed.fetch_raw(source.url)
+    _save_snapshot(source, raw)
+    return heureka_feed.parse(raw)
+
+
 def run_source(session: Session, source: FeedSource) -> str:
-    items = heureka_feed.fetch(source.url)
+    items = _fetch_items(source)
     kept = [i for i in items if heureka_feed.matches_filter(i, source.category_filter)]
     for item in kept:
         product = _upsert_product(session, item)

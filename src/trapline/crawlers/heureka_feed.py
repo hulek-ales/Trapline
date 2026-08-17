@@ -93,8 +93,8 @@ def parse(xml_bytes: bytes) -> list[FeedItem]:
     return items
 
 
-def fetch(url: str) -> list[FeedItem]:
-    """Stáhne a naparsuje feed. Chyby (síť, XML) propadají volajícímu."""
+def fetch_raw(url: str) -> bytes:
+    """Stáhne syrový feed. Chyby (síť) propadají volajícímu."""
     with httpx.Client(
         headers={"User-Agent": settings.user_agent},
         timeout=120,
@@ -104,7 +104,12 @@ def fetch(url: str) -> list[FeedItem]:
         resp.raise_for_status()
         if len(resp.content) > MAX_BYTES:
             raise ValueError(f"feed přes {MAX_BYTES // 1024 // 1024} MB")
-        return parse(resp.content)
+        return resp.content
+
+
+def fetch(url: str) -> list[FeedItem]:
+    """Stáhne a naparsuje feed. Chyby (síť, XML) propadají volajícímu."""
+    return parse(fetch_raw(url))
 
 
 def matches_filter(item: FeedItem, category_filter: str) -> bool:

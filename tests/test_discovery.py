@@ -105,13 +105,13 @@ def _src(session, name="Shop A", url="https://a.example/feed.xml") -> FeedSource
 
 
 def test_dedup_pres_ean(session, monkeypatch):
-    monkeypatch.setattr(heureka_feed, "fetch", lambda url: [_item()])
+    monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
     discovery.run_source(session, _src(session))
     # stejný EAN z jiného obchodu s jiným názvem → týž produkt, druhá nabídka
     monkeypatch.setattr(
-        heureka_feed, "fetch",
-        lambda url: [_item(item_id="Y9", name="BestBerg BBPF-30A lednice do auta",
-                           url="https://b.example/y9/")],
+        discovery, "_fetch_items",
+        lambda source: [_item(item_id="Y9", name="BestBerg BBPF-30A lednice do auta",
+                              url="https://b.example/y9/")],
     )
     discovery.run_source(session, _src(session, "Shop B", "https://b.example/feed.xml"))
 
@@ -122,11 +122,11 @@ def test_dedup_pres_ean(session, monkeypatch):
 
 def test_dedup_bez_ean_pres_brand_model(session, monkeypatch):
     """Menší eshopy EAN nemají — druhý výskyt téhož názvu se nesmí založit znovu."""
-    monkeypatch.setattr(heureka_feed, "fetch", lambda url: [_item(ean=None)])
+    monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item(ean=None)])
     discovery.run_source(session, _src(session))
     monkeypatch.setattr(
-        heureka_feed, "fetch",
-        lambda url: [_item(ean=None, item_id="Z2", url="https://b.example/z2/")],
+        discovery, "_fetch_items",
+        lambda source: [_item(ean=None, item_id="Z2", url="https://b.example/z2/")],
     )
     discovery.run_source(session, _src(session, "Shop B", "https://b.example/feed.xml"))
     assert len(session.scalars(select(Product)).all()) == 1
@@ -136,9 +136,9 @@ def test_opakovany_beh_pridava_jen_cenu(session, monkeypatch):
     """Druhý běh téhož zdroje: žádný nový produkt ani nabídka, jen záznam ceny
     (append-only PriceHistory, viz ADR-0002)."""
     src = _src(session)
-    monkeypatch.setattr(heureka_feed, "fetch", lambda url: [_item()])
+    monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
     discovery.run_source(session, src)
-    monkeypatch.setattr(heureka_feed, "fetch", lambda url: [_item(price=5499.0)])
+    monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item(price=5499.0)])
     discovery.run_source(session, src)
 
     assert len(session.scalars(select(Product)).all()) == 1
@@ -150,10 +150,10 @@ def test_opakovany_beh_pridava_jen_cenu(session, monkeypatch):
 def test_chyba_zdroje_se_zapise(session, monkeypatch):
     src = _src(session)
 
-    def boom(url):
+    def boom(source):
         raise ValueError("feed nedostupný")
 
-    monkeypatch.setattr(heureka_feed, "fetch", boom)
+    monkeypatch.setattr(discovery, "_fetch_items", boom)
     with pytest.raises(ValueError):
         discovery.run_source(session, src)
 
@@ -203,7 +203,7 @@ def test_products_endpoint(client, monkeypatch):
     })
     with Session(db._engine) as s:
         src = s.scalars(select(FeedSource)).first()
-        monkeypatch.setattr(heureka_feed, "fetch", lambda url: [_item()])
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
         discovery.run_source(s, src)
 
     rows = client.get("/api/discovery/products").json()
@@ -219,3 +219,35 @@ def test_discovery_je_za_heslem(client, monkeypatch):
     monkeypatch.setattr(settings, "app_password", "tajne")
     assert client.get("/api/discovery/products").status_code == 401
     assert client.post("/api/discovery/run").status_code == 401
+
+
+def test_snapshot_se_uklada_a_promazava(session, monkeypatch, tmp_path):
+    """Syrový feed se gzipne na disk (ADR-0004) a drží se jen posledních N."""
+    import gzip
+
+    monkeypatch.setattr(settings, "snapshot_dir", str(tmp_path))
+    monkeypatch.setattr(heureka_feed, "fetch_raw", lambda url: FEED)
+    monkeypatch.setattr(discovery, "SNAPSHOT_KEEP", 2)
+    src = _src(session)
+
+    items = discovery._fetch_items(src)
+    assert len(items) == 2  # parse proběhl nad snapshotovanými daty
+
+    snaps = list((tmp_path / str(src.id)).glob("*.xml.gz"))
+    assert len(snaps) == 1
+    assert gzip.decompress(snaps[0].read_bytes()) == FEED
+
+    # retence: třetí snapshot smaže nejstarší
+    for stamp in ("19990101T000000", "19990101T000001"):
+        (tmp_path / str(src.id) / f"{stamp}.xml.gz").write_bytes(b"stary")
+    discovery._fetch_items(src)
+    snaps = sorted(p.name for p in (tmp_path / str(src.id)).glob("*.xml.gz"))
+    assert len(snaps) == 2
+    assert "19990101T000000.xml.gz" not in snaps
+
+
+def test_vypnute_snapshoty_nic_nezapisou(session, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "snapshot_dir", "")
+    monkeypatch.setattr(heureka_feed, "fetch_raw", lambda url: FEED)
+    discovery._fetch_items(_src(session))
+    assert list(tmp_path.iterdir()) == []

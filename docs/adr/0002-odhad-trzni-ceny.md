@@ -67,3 +67,20 @@ a alerting je podle toho blokovaný.
 `gone_at` se musí plnit spolehlivě, jinak celá metoda ztrácí smysl. Watcher
 proto musí dělat diff proti předchozímu snapshotu, ne jen append nových
 inzerátů.
+
+## Dodatek (2026-08-17): poučení pro fázi cenových alertů
+
+Z návrhové fáze pocházejí dvě chyby alertovacích pravidel, odhalené testy
+v prototypu. Modul detekce poklesu ceny zatím v repu není — až se bude
+stavět, tahle poučení do něj patří od prvního dne:
+
+1. **„Nejnižší cena za 90 dní" bez prahu citelnosti** se spouštěla při
+   poklesu o 1,2 %. Minimum musí být zároveň citelně pod dlouhodobým
+   mediánem (`MIN_MEANINGFUL_DROP ≈ 0.05`).
+2. **Baseline z klouzavého mediánu je manipulovatelná prodejcem.** Když
+   eshop před akcí zvedne cenu z 8 000 na 12 000, nafoukne se i 30denní
+   medián a návrat na 7 900 vypadá jako 34% sleva. Baseline proto musí
+   brát *nižší* z krátkodobého a dlouhodobého mediánu.
+
+Obecné poučení: každá klouzavá statistika použitá jako reference je
+manipulovatelná tím, kdo ceny nastavuje.
