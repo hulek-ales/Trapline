@@ -14,8 +14,9 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
+from .. import logbuffer
 from ..config import settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -55,6 +56,17 @@ def _guard() -> None:
         raise HTTPException(
             403, "Aktualizace přes UI nejsou povolené (UPDATE_ENABLED)."
         )
+
+
+@router.get("/log")
+def system_log(
+    limit: int = Query(100, le=500),
+    level: str | None = Query(None, description="INFO|WARNING|ERROR"),
+    contains: str | None = Query(None, description="podřetězec ve zprávě"),
+):
+    """Poslední logy z paměti appky — co dělají procesy na pozadí, bez
+    přístupu k docker logs. Nejnovější první."""
+    return {"items": logbuffer.get_records(limit=limit, level=level, contains=contains)}
 
 
 @router.get("/version")

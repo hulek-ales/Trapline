@@ -251,3 +251,52 @@ def test_vypnute_snapshoty_nic_nezapisou(session, monkeypatch, tmp_path):
     monkeypatch.setattr(heureka_feed, "fetch_raw", lambda url: FEED)
     discovery._fetch_items(_src(session))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_products_slucuje_barevne_varianty(client, monkeypatch):
+    """Tři barvy téhož modelu = jeden řádek s variant_count=3."""
+    with Session(db._engine) as s:
+        src = _src(s)
+        items = [
+            _item(item_id=f"BBFR-95X{c}", ean=None,
+                  name=f"Chladnička BestBerg BBFR-95X{c} / 84 l / {barva}",
+                  url=f"https://a.example/95x{c.lower()}/", price=cena)
+            for c, barva, cena in [("B", "černá", 5000.0), ("S", "stříbrná", 5200.0),
+                                   ("W", "bílá", 5100.0)]
+        ]
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: items)
+        discovery.run_source(s, src)
+
+    rows = client.get("/api/discovery/products").json()
+    assert len(rows) == 1
+    fam = rows[0]
+    assert fam["variant_count"] == 3
+    assert len(fam["variant_titles"]) == 3
+    assert fam["price_min"] == 5000.0
+    assert fam["price_max"] == 5200.0
+    assert fam["offers"] == 3
+    assert fam["title"].startswith("Chladnička BestBerg BBFR-95X")
+
+
+def test_products_vraci_obrazek(client, monkeypatch):
+    with Session(db._engine) as s:
+        src = _src(s)
+        it = _item()
+        it.image = "https://cdn.example/foto.jpg"
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: [it])
+        discovery.run_source(s, src)
+    rows = client.get("/api/discovery/products").json()
+    assert rows[0]["image"] == "https://cdn.example/foto.jpg"
+    # interní klíče se do API specs nepropisují
+    assert "_img" not in rows[0]["specs"]
+    assert "_popis" not in rows[0]["specs"]
+
+
+def test_system_log_endpoint(client):
+    import logging
+
+    from trapline import logbuffer
+    logbuffer.install()
+    logging.getLogger("trapline.test").info("testovací zpráva 42")
+    body = client.get("/api/system/log?contains=42").json()
+    assert any("testovací zpráva 42" in r["msg"] for r in body["items"])

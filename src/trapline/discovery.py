@@ -70,8 +70,11 @@ def _upsert_product(session: Session, item: FeedItem) -> Product:
     if product is None:
         specs = dict(item.params)
         if item.description:
-            # klíče s podtržítkem GUI nezobrazuje; popis je vstup pro LLM
+            # klíče s podtržítkem GUI nezobrazuje v parametrech; popis je
+            # vstup pro LLM, _img náhled pro katalog
             specs["_popis"] = item.description
+        if item.image:
+            specs["_img"] = item.image
         product = Product(
             ean=item.ean,
             brand=brand,
@@ -90,6 +93,8 @@ def _upsert_product(session: Session, item: FeedItem) -> Product:
     merged = dict(item.params)
     if item.description:
         merged["_popis"] = item.description
+    if item.image:
+        merged["_img"] = item.image
     merged.update(product.specs or {})
     product.specs = merged
     return product
