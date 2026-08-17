@@ -1,0 +1,78 @@
+# TrueNAS SCALE → Apps → Discover → Custom App → "Install via YAML".
+#
+# Aplikace se nebuildí z tohohle stromu: image nese jen toolchain a kód si
+# při startu naklonuje z Gitu do volume `app_code`. Aktualizace se pak dělá
+# tlačítkem „Aktualizovat z Gitu" ve webovém GUI, ne přenasazením appky.
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/hulek-ales/trapline:latest}
+    pull_policy: ${APP_PULL_POLICY:-always}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- self-update z GUI ---------------------------------------------
+      # UPDATE_ENABLED=true zpřístupní tlačítko. Bez něj se panel v GUI
+      # nevykreslí a /api/system/{check,update} vrací 403.
+      UPDATE_ENABLED: ${UPDATE_ENABLED:-true}
+      REPO_URL: ${REPO_URL:-https://github.com/hulek-ales/Trapline.git}
+      REPO_BRANCH: ${REPO_BRANCH:-main}
+      REPO_DIR: /app
+      # --- aplikace -------------------------------------------------------
+      TRAPLINE_DB_URL: >-
+        mysql+pymysql://trapline:${DB_PASSWORD:-traplineVychoziHeslo}@db:3306/trapline?charset=utf8mb4
+      TRAPLINE_OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      TRAPLINE_LLM_BULK: ${LLM_BULK:-qwen3:4b}
+      TRAPLINE_LLM_MAIN: ${LLM_MAIN:-qwen3:14b}
+      TRAPLINE_ALLEGRO_CLIENT_ID: ${ALLEGRO_CLIENT_ID:-}
+      TRAPLINE_ALLEGRO_CLIENT_SECRET: ${ALLEGRO_CLIENT_SECRET:-}
+      TRAPLINE_NTFY_URL: ${NTFY_URL:-https://ntfy.sh/}
+      TRAPLINE_NTFY_TOPIC: ${NTFY_TOPIC:-}
+      TRAPLINE_HOME_LAT: ${HOME_LAT:-50.5606}
+      TRAPLINE_HOME_LON: ${HOME_LON:-15.9127}
+      TRAPLINE_USER_AGENT: ${USER_AGENT:-Trapline/0.1 (+osobni cenovy monitor)}
+      TRAPLINE_REQUEST_DELAY_S: ${REQUEST_DELAY_S:-2.5}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - ${APP_PORT:-38081}:8000
+    volumes:
+      # Pracovní strom Gitu. Musí přežít restart kontejneru, jinak se při
+      # každém startu klonuje znovu.
+      - app_code:/app
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # První start klonuje repo a instaluje závislosti – pár minut.
+      start_period: 300s
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    command:
+      - '--innodb-buffer-pool-size=256M'
+    environment:
+      MARIADB_DATABASE: trapline
+      MARIADB_USER: trapline
+      MARIADB_PASSWORD: ${DB_PASSWORD:-traplineVychoziHeslo}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-traplineVychoziHesloRoot}
+    healthcheck:
+      test:
+        - CMD
+        - healthcheck.sh
+        - '--connect'
+        - '--innodb_initialized'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  app_code:
+  db_data:

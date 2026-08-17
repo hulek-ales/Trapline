@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trapline</title>
+<style>
+  :root {
+    --bg: #f6f7f5; --card: #fff; --line: #e3e5e0; --ink: #22261f;
+    --accent: #4a7c3f; --accent-ink: #fff; --warn: #b4531f; --ok: #3f7c4a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161814; --card: #1e211c; --line: #32362e; --ink: #e8eae4;
+      --accent: #6ea45e; --accent-ink: #14170f; --warn: #e0894f; --ok: #7fc08c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; }
+  header { margin-bottom: 1.5rem; }
+  h1 { margin: 0; font-size: 1.6rem; }
+  header p { margin: .25rem 0 0; opacity: .6; font-size: .9rem; }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.25rem; margin-bottom: 1rem;
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  h2 { margin: 0 0 .25rem; font-size: 1.05rem; }
+  .meta { font-variant-numeric: tabular-nums; font-size: .8rem; opacity: .5; }
+  .subject { margin: .25rem 0 0; font-size: .9rem; opacity: .75; }
+  .date { margin: .15rem 0 1rem; font-size: .78rem; opacity: .45; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+  button {
+    font: inherit; padding: .5rem 1rem; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  }
+  button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+  button[disabled] { opacity: .5; cursor: default; }
+  .msg { font-size: .88rem; opacity: .7; }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .hint { margin: .6rem 0 0; font-size: .78rem; opacity: .45; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Trapline</h1>
+    <p>Pasti na podhodnocené nabídky — správa a údržba</p>
+  </header>
+
+  <!-- Panel se zobrazí jen když je UPDATE_ENABLED=true, stejně jako v Kuchařce. -->
+  <section id="system" hidden>
+    <div class="row">
+      <h2>Verze a aktualizace</h2>
+      <span class="meta" id="ver">—</span>
+    </div>
+    <p class="subject" id="subject">—</p>
+    <p class="date" id="date"></p>
+
+    <p class="msg" id="check" hidden></p>
+
+    <div class="actions">
+      <button class="ghost" id="btn-check">Zkontrolovat aktualizace</button>
+      <button id="btn-update">Aktualizovat z Gitu</button>
+      <span class="msg" id="msg"></span>
+    </div>
+
+    <p class="hint" id="manual-hint" hidden>
+      Mimo Docker: po stažení je potřeba ručně restartovat API.
+    </p>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = {
+  version: () => fetch("/api/system/version").then((r) => r.json()),
+  check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
+  update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
+};
+function ok(r) { if (!r.ok) throw new Error(r.status); return r.json(); }
+
+let version = null;
+let busy = false;
+
+function setBusy(v) {
+  busy = v;
+  $("btn-check").disabled = v;
+  $("btn-update").disabled = v;
+  $("btn-update").textContent = v ? "Pracuji…" : "Aktualizovat z Gitu";
+}
+
+function render(v) {
+  version = v;
+  // Zakázané aktualizace = panel vůbec není. Ať to nesvádí ke klikání.
+  $("system").hidden = !v || !v.enabled;
+  if (!v || !v.enabled) return;
+  $("ver").textContent = `${v.branch}@${v.commit || "?"}`;
+  $("subject").textContent = v.subject || "—";
+  $("date").textContent = v.date || "";
+  $("manual-hint").hidden = !!v.supervised;
+}
+
+async function loadVersion() {
+  try { render(await api.version()); } catch { /* API startuje */ }
+}
+
+$("btn-check").onclick = async () => {
+  setBusy(true);
+  $("msg").textContent = "";
+  try {
+    const c = await api.check();
+    const el = $("check");
+    el.hidden = false;
+    if (c.update_available) {
+      el.className = "msg warn";
+      el.textContent = `K dispozici je ${c.behind} nových commitů — naposled: „${c.remote_subject}"`;
+    } else {
+      el.className = "msg ok";
+      el.textContent = "Máš nejnovější verzi ✓";
+    }
+  } catch {
+    $("msg").textContent = "Kontrola selhala.";
+  } finally {
+    setBusy(false);
+  }
+};
+
+$("btn-update").onclick = async () => {
+  setBusy(true);
+  $("msg").textContent = "Spouštím aktualizaci…";
+  try {
+    const r = await api.update();
+    $("msg").textContent = r.message || "Aktualizuji…";
+    // Pod supervisorem API odejde a vrátí se na novém commitu — čekáme na
+    // změnu hashe, ne na uplynutí času.
+    const before = version && version.commit;
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      try {
+        const nv = await api.version();
+        if (nv.commit && nv.commit !== before) {
+          clearInterval(poll);
+          render(nv);
+          $("check").hidden = true;
+          $("msg").textContent = `Aktualizováno na ${nv.commit} ✓`;
+          setBusy(false);
+          return;
+        }
+      } catch { /* API zrovna restartuje */ }
+      if (tries > 120) {
+        clearInterval(poll);
+        $("msg").textContent = "Restart trvá déle – zkontroluj logy kontejneru.";
+        setBusy(false);
+      }
+    }, 2000);
+  } catch {
+    $("msg").textContent = "Aktualizace selhala.";
+    setBusy(false);
+  }
+};
+
+loadVersion();
+</script>
+</body>
+</html>

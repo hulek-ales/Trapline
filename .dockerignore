@@ -1,0 +1,5 @@
+**
+!Dockerfile
+!pyproject.toml
+!docker/entrypoint.sh
+!docker/pydeps.py

@@ -47,7 +47,8 @@ předchozímu snapshotu), ne jen nové položky.
 - [ ] Allegro REST API klient (OAuth2 client_credentials)
 - [ ] LLM klasifikace inzerátů (qwen3:4b, structured output)
 - [ ] Alembic migrace
-- [ ] FastAPI backend
+- [x] FastAPI skořápka + GUI se self-update z Gitu (`api/`)
+- [ ] FastAPI backend — doménové endpointy
 - [ ] React GUI + like/dislike
 - [ ] ntfy notifikace
 
@@ -58,6 +59,24 @@ pip install -e ".[dev]"
 pytest
 ruff check .
 ```
+
+## Spuštění GUI
+
+```bash
+UPDATE_ENABLED=true uvicorn trapline.api.main:app --port 8000
+```
+
+Zatím jde o skořápku: statická stránka a panel **Verze a aktualizace**, který
+umí stáhnout novou verzi z Gitu a restartovat se — stejný mechanismus jako
+v Kuchařce. Doménové obrazovky přibudou, až budou hotové crawlery.
+
+Pod Dockerem běží uvicorn v supervisor smyčce (`docker/entrypoint.sh`);
+tlačítko ukončí proces a smyčka udělá `git pull`, doinstaluje závislosti
+a nastartuje novou verzi. Mimo Docker jen pullne a vyzve k ručnímu restartu.
+Bez `UPDATE_ENABLED=true` se panel vůbec nevykreslí a endpointy vrací 403.
+
+Nasazení na TrueNAS (custom app YAML) popisuje [DEPLOY-TRUENAS.md](DEPLOY-TRUENAS.md),
+hotová definice je v [`TrueNasAPP.yaml`](TrueNasAPP.yaml).
 
 ## Rozhodnutí
 
