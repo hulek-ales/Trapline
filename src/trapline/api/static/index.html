@@ -55,6 +55,16 @@
     background: none; border: none; color: var(--ink); opacity: .55;
     font-size: .82rem; padding: 0; text-decoration: underline; cursor: pointer;
   }
+  input[type=text], input[type=number] {
+    font: inherit; padding: .5rem .65rem; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+  th { font-size: .78rem; opacity: .55; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; }
+  tr.inactive td { opacity: .45; }
+  .empty { opacity: .5; font-size: .9rem; margin: .5rem 0 1rem; }
 </style>
 </head>
 <body>
@@ -75,6 +85,28 @@
       <input type="password" id="password" placeholder="Heslo" autocomplete="current-password" required>
       <button type="submit" id="btn-login">Přihlásit</button>
       <span class="err" id="login-err"></span>
+    </form>
+  </section>
+
+  <section id="traps" hidden>
+    <div class="row">
+      <h2>Pasti</h2>
+      <span class="meta" id="traps-count"></span>
+    </div>
+    <p class="subject">Kritéria, která agent obchází a hlídá pro ně nabídky.</p>
+    <p class="empty" id="traps-empty" hidden>Zatím žádné pasti. Přidej první níž.</p>
+    <table id="traps-table" hidden>
+      <thead>
+        <tr><th>Název</th><th>Hledané výrazy</th><th>Budget</th><th></th><th></th></tr>
+      </thead>
+      <tbody id="traps-body"></tbody>
+    </table>
+    <form class="actions" id="trap-form">
+      <input type="text" id="trap-name" placeholder="Název pasti" required>
+      <input type="text" id="trap-terms" placeholder="výrazy, oddělené, čárkou">
+      <input type="number" id="trap-budget" placeholder="Budget Kč" min="1" style="width:8rem">
+      <button type="submit">Přidat past</button>
+      <span class="msg" id="traps-msg"></span>
     </form>
   </section>
 
@@ -111,6 +143,20 @@ const api = {
     body: JSON.stringify({ password }),
   }).then(ok),
   logout: () => fetch("/api/auth/logout", { method: "POST" }).then(ok),
+  traps:      () => fetch("/api/criteria").then(ok),
+  trapAdd:    (t) => fetch("/api/criteria", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(t),
+  }).then(ok),
+  trapPatch:  (id, t) => fetch(`/api/criteria/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(t),
+  }).then(ok),
+  trapDelete: (id) => fetch(`/api/criteria/${id}`, { method: "DELETE" })
+    .then((r) => { if (r.status === 401) { showLogin(); throw new Error("401"); }
+                   if (!r.ok && r.status !== 204) throw new Error(r.status); }),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -151,8 +197,74 @@ async function loadVersion() {
 function showLogin() {
   $("login").hidden = false;
   $("system").hidden = true;
+  $("traps").hidden = true;
   $("btn-logout").hidden = true;
 }
+
+function esc(s) {
+  const d = document.createElement("span");
+  d.textContent = s == null ? "" : String(s);
+  return d.innerHTML;
+}
+
+async function loadTraps() {
+  let rows;
+  try {
+    rows = await api.traps();
+  } catch (e) {
+    if (e.message !== "401") {
+      $("traps").hidden = false;
+      $("traps-msg").textContent = "Databáze není dostupná.";
+    }
+    return;
+  }
+  $("traps").hidden = false;
+  $("traps-msg").textContent = "";
+  $("traps-count").textContent = rows.length || "";
+  $("traps-empty").hidden = rows.length > 0;
+  $("traps-table").hidden = rows.length === 0;
+  $("traps-body").innerHTML = rows.map((t) => `
+    <tr class="${t.active ? "" : "inactive"}" data-id="${t.id}">
+      <td>${esc(t.name)}</td>
+      <td>${esc((t.query_terms || []).join(", "))}</td>
+      <td class="num">${t.budget_max ? esc(t.budget_max) + " Kč" : "—"}</td>
+      <td><button class="link" data-act="toggle">${t.active ? "pozastavit" : "obnovit"}</button></td>
+      <td><button class="link" data-act="del">smazat</button></td>
+    </tr>`).join("");
+}
+
+$("traps-body").onclick = async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const tr = btn.closest("tr");
+  const id = Number(tr.dataset.id);
+  btn.disabled = true;
+  try {
+    if (btn.dataset.act === "del") {
+      if (!confirm("Smazat past včetně nastavení?")) return;
+      await api.trapDelete(id);
+    } else {
+      await api.trapPatch(id, { active: tr.classList.contains("inactive") });
+    }
+    await loadTraps();
+  } catch { $("traps-msg").textContent = "Akce selhala."; }
+  finally { btn.disabled = false; }
+};
+
+$("trap-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const t = {
+    name: $("trap-name").value.trim(),
+    query_terms: $("trap-terms").value.split(",").map((x) => x.trim()).filter(Boolean),
+  };
+  const budget = Number($("trap-budget").value);
+  if (budget > 0) t.budget_max = budget;
+  try {
+    await api.trapAdd(t);
+    $("trap-form").reset();
+    await loadTraps();
+  } catch { $("traps-msg").textContent = "Uložení selhalo."; }
+};
 
 async function boot() {
   let st;
@@ -165,6 +277,7 @@ async function boot() {
   $("login").hidden = true;
   $("btn-logout").hidden = !st.required;
   loadVersion();
+  loadTraps();
 }
 
 $("login-form").onsubmit = async (e) => {

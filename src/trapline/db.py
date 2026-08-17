@@ -1,0 +1,58 @@
+"""Připojení k databázi a inicializace schématu.
+
+Schéma se zatím vytváří přes ``create_all`` — Alembic přijde na řadu, až
+bude potřeba první skutečná migrace existujících dat (viz TODO v README).
+
+Engine vzniká líně a start appky na databázi nečeká: ``/api/system/*`` musí
+fungovat i s lehlou DB, jinak by nešel spustit self-update, který by ji
+třeba opravil. Doménové endpointy si dostupnost vynutí přes ``ensure_ready``
+a při výpadku vrací 503 — a při dalším requestu to zkusí znovu, takže se
+appka po náběhu DB sama chytne.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from .config import settings
+from .models import Base
+
+log = logging.getLogger("trapline.db")
+
+_engine: Engine | None = None
+_ready: bool = False
+
+
+def is_ready() -> bool:
+    """Poslední známý stav bez dotyku DB — pro health, který nesmí čekat
+    na connection timeout."""
+    return _ready
+
+
+def get_engine() -> Engine:
+    global _engine
+    if _engine is None:
+        _engine = create_engine(settings.db_url, pool_pre_ping=True)
+    return _engine
+
+
+def ensure_ready() -> bool:
+    """Vytvoř schéma, pokud ještě není. True = DB je použitelná."""
+    global _ready
+    if _ready:
+        return True
+    try:
+        Base.metadata.create_all(get_engine())
+        _ready = True
+        log.info("Databáze připravená (%s tabulek).", len(Base.metadata.tables))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Databáze není dostupná: %s", exc)
+    return _ready
+
+
+def open_session() -> Session:
+    return Session(get_engine())

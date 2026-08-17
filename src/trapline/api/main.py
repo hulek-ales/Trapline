@@ -15,8 +15,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import db
 from ..config import settings
-from . import auth, system
+from . import auth, criteria, system
 
 log = logging.getLogger("trapline.api")
 
@@ -44,6 +45,9 @@ def _warn_o_zabezpeceni() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _warn_o_zabezpeceni()
+    # Nezdar nevadí — start na DB nečeká, doménové endpointy vrací 503
+    # a při dalším requestu se o inicializaci pokusí znovu.
+    db.ensure_ready()
     yield
 
 
@@ -51,6 +55,7 @@ app = FastAPI(title="Trapline", version="0.1.0", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(system.router)
+app.include_router(criteria.router)
 
 
 @app.middleware("http")
@@ -65,7 +70,8 @@ async def _auth_middleware(request: Request, call_next):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    # db je poslední známý stav, ne živý dotaz — health nesmí čekat na timeout.
+    return {"status": "ok", "db": db.is_ready()}
 
 
 if STATIC_DIR.is_dir():

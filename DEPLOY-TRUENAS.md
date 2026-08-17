@@ -53,8 +53,10 @@ networks:
 **První start trvá pár minut** — klonuje repo a instaluje závislosti. Proto
 má healthcheck `start_period: 300s`. Průběh: `docker compose logs -f app`.
 
-Databáze `db` (MariaDB) je připravená dopředu; API ji zatím nepoužívá,
-protože doménové endpointy ještě nejsou hotové (viz „Stav" v README).
+Databáze `db` (MariaDB) se používá od prvního startu — appka si v ní sama
+vytvoří schéma (`create_all`) a ukládá do ní kritéria („pasti“). Start API
+na DB nečeká: kdyby lehla, doménové endpointy vrací 503, ale GUI a
+self-update jedou dál — i proto, aby šla případná oprava natáhnout z Gitu.
 
 ## 3. Aktualizace z webu
 

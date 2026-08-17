@@ -48,7 +48,8 @@ předchozímu snapshotu), ne jen nové položky.
 - [ ] LLM klasifikace inzerátů (qwen3:4b, structured output)
 - [ ] Alembic migrace
 - [x] FastAPI skořápka + GUI se self-update z Gitu (`api/`)
-- [ ] FastAPI backend — doménové endpointy
+- [x] DB inicializace (`db.py`, create_all) + CRUD kritérií v API a GUI
+- [ ] FastAPI backend — zbylé doménové endpointy (produkty, inzeráty, alerty)
 - [ ] React GUI + like/dislike
 - [ ] ntfy notifikace
 
