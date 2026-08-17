@@ -445,7 +445,7 @@ async function loadProcs() {
   const items = logs.items || [];
   $("loglist").innerHTML = items.length
     ? items.map((r) => `<div class="${r.level === "WARNING" || r.level === "ERROR" ? "warn" : ""}">` +
-        `${esc(r.ts.slice(11, 19))} ${esc(r.msg)}</div>`).join("")
+        `${esc(new Date(r.ts).toLocaleTimeString("cs"))} ${esc(r.msg)}</div>`).join("")
     : "—";
   // dokud něco běží, obnovuj automaticky (a po doběhnutí překresli katalog)
   const running = disc.running || score.running;
