@@ -10,6 +10,7 @@ proti předfiltru pasti. Výsledek se zakládá jako VYPNUTÝ zdroj s poznámkou
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import UTC, datetime
@@ -98,6 +99,43 @@ def _domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+#: href na externí web ve stránce výsledků. Vnitřní odkazy SearXNG
+#: (nastavení, další stránka…) jsou relativní, takže je regex mine.
+_HTML_LINK = re.compile(r'href="(https?://[^"]+)"')
+
+
+def extract_domains_from_html(html: str) -> list[str]:
+    """Domény z HTML stránky výsledků — v pořadí prvního výskytu."""
+    seen: list[str] = []
+    for url in _HTML_LINK.findall(html):
+        dom = _domain(url)
+        if dom and dom not in seen:
+            seen.append(dom)
+    return seen
+
+
+def _search_one(client: httpx.Client, query: str) -> list[str]:
+    """Jeden dotaz na SearXNG → domény. Preferuje JSON API; když je
+    zamčené (403 — defaultně vypnuté formats: json), sjede HTML výstup,
+    který funguje vždy."""
+    base = f"{settings.searxng_url.rstrip('/')}/search"
+    params = {"q": query, "language": "cs", "categories": "general"}
+    try:
+        resp = client.get(base, params={**params, "format": "json"})
+        resp.raise_for_status()
+        return [
+            _domain(item.get("url", ""))
+            for item in resp.json().get("results", [])
+        ]
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 403:
+            raise
+    # JSON API zamčené → HTML fallback
+    resp = client.get(base, params=params)
+    resp.raise_for_status()
+    return extract_domains_from_html(resp.text)
+
+
 def search_domains(queries: list[str]) -> list[str]:
     """SearXNG → kandidátní domény, seřazené podle četnosti ve výsledcích."""
     counts: dict[str, int] = {}
@@ -106,22 +144,11 @@ def search_domains(queries: list[str]) -> list[str]:
     ) as client:
         for query in queries:
             try:
-                resp = client.get(
-                    f"{settings.searxng_url.rstrip('/')}/search",
-                    params={
-                        "q": query,
-                        "format": "json",
-                        "language": "cs",
-                        "categories": "general",
-                    },
-                )
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
+                domains = _search_one(client, query)
             except Exception as exc:  # noqa: BLE001
                 _note(f"hledání „{query}“ selhalo: {exc}")
                 continue
-            for item in results:
-                dom = _domain(item.get("url", ""))
+            for dom in domains:
                 if not dom or any(dom.endswith(b) for b in DOMAIN_BLACKLIST):
                     continue
                 counts[dom] = counts.get(dom, 0) + 1
