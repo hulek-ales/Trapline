@@ -48,7 +48,8 @@ předchozímu snapshotu), ne jen nové položky.
 - [ ] LLM klasifikace inzerátů (qwen3:4b, structured output)
 - [ ] Alembic migrace
 - [x] FastAPI skořápka + GUI se self-update z Gitu (`api/`)
-- [ ] FastAPI backend — doménové endpointy
+- [x] DB inicializace (`db.py`, create_all) + CRUD kritérií v API a GUI
+- [ ] FastAPI backend — zbylé doménové endpointy (produkty, inzeráty, alerty)
 - [ ] React GUI + like/dislike
 - [ ] ntfy notifikace
 
@@ -63,8 +64,14 @@ ruff check .
 ## Spuštění GUI
 
 ```bash
-UPDATE_ENABLED=true uvicorn trapline.api.main:app --port 8000
+APP_PASSWORD=nejake-heslo UPDATE_ENABLED=true \
+  uvicorn trapline.api.main:app --port 8000
 ```
+
+`APP_PASSWORD` zapne přihlašovací obrazovku a zavře celé `/api/` (kromě
+`/api/auth/*` a `/api/health`). Bez něj je appka otevřená a při zapnutém
+self-update na to při startu upozorní v logu — endpoint umí spustit `git pull`
+a restart procesu. Detaily v [DEPLOY-TRUENAS.md](DEPLOY-TRUENAS.md).
 
 Zatím jde o skořápku: statická stránka a panel **Verze a aktualizace**, který
 umí stáhnout novou verzi z Gitu a restartovat se — stejný mechanismus jako

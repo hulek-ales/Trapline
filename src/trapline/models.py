@@ -12,9 +12,10 @@ Obě se potkávají v PriceReference.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, date
+from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -24,7 +25,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -133,7 +133,7 @@ class Product(Base):
 
     first_seen: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    offers: Mapped[list["Offer"]] = relationship(back_populates="product")
+    offers: Mapped[list[Offer]] = relationship(back_populates="product")
 
 
 # --------------------------------------------------------------------------- #
@@ -238,7 +238,9 @@ class ListingMatch(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
-    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), index=True)
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id"), index=True
+    )
 
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     condition: Mapped[Condition] = mapped_column(

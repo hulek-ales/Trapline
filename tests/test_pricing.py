@@ -1,4 +1,3 @@
-import math
 
 import pytest
 
@@ -12,7 +11,6 @@ from trapline.pricing.reference import (
     winsorize,
 )
 from trapline.pricing.scoring import DealInput, pickup_cost, score_deal
-
 
 # --------------------------------------------------------------------------- #
 # Váhy a statistika

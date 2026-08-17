@@ -44,6 +44,16 @@ class Settings:
         self.ntfy_url: str = _env("NTFY_URL", "https://ntfy.sh/")
         self.ntfy_topic: str = _env("NTFY_TOPIC")
 
+        # --- Zabezpečení GUI ---------------------------------------------
+        #: Jedno sdílené heslo. Prázdné = GUI i API jsou otevřené.
+        self.app_password: str = _env("APP_PASSWORD")
+        #: Volitelné přebití podpisového klíče. Prázdné = odvodí se z hesla
+        #: (viz api.auth._secret), aby relace přežily restart po aktualizaci.
+        self.auth_secret: str = _env("AUTH_SECRET")
+        #: Za HTTPS proxy zapni – cookie se pak posílá jen po šifrovaném
+        #: spojení. Po LAN na http musí zůstat vypnuté, jinak se neuloží.
+        self.auth_cookie_secure: bool = _truthy(_env("AUTH_COOKIE_SECURE", "false"))
+
         # --- Self-update z Gitu přes WEB UI ------------------------------
         #: Bez tohohle je celý /api/system/{check,update} zakázaný a GUI panel
         #: se ani nevykreslí. Default false — zapíná se vědomě v compose.
@@ -52,6 +62,10 @@ class Settings:
         #: tohohle souboru (viz api.system._repo_dir).
         self.repo_dir: str = _env("REPO_DIR", "")
         self.repo_branch: str = _env("REPO_BRANCH", "main")
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.app_password)
 
 
 settings = Settings()
