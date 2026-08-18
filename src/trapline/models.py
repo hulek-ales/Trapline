@@ -51,6 +51,7 @@ class Source(enum.StrEnum):
 
     JSONLD = "jsonld"          # přímý scrape produktové stránky eshopu
     HEUREKA_FEED = "feed"      # XML feed eshopu
+    ZBOZI = "zbozi"            # zbozi.cz detail produktu (min. cena napříč obchody)
     ALLEGRO = "allegro"        # oficiální REST API
     SBAZAR = "sbazar"
     BAZOS = "bazos"

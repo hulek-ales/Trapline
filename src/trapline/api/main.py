@@ -15,9 +15,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import db, logbuffer
+from .. import db, logbuffer, watcher
 from ..config import settings
-from . import auth, criteria, discovery, feedback, scoring, system
+from . import alerts, auth, criteria, discovery, feedback, scoring, system
 
 log = logging.getLogger("trapline.api")
 
@@ -49,6 +49,10 @@ async def lifespan(_: FastAPI):
     # Nezdar nevadí — start na DB nečeká, doménové endpointy vrací 503
     # a při dalším requestu se o inicializaci pokusí znovu.
     db.ensure_ready()
+    try:
+        watcher.start()
+    except Exception:  # noqa: BLE001 — bez plánovače appka pořád funguje
+        log.exception("plánovač obchůzky se nepodařilo spustit")
     yield
 
 
@@ -60,6 +64,7 @@ app.include_router(criteria.router)
 app.include_router(discovery.router)
 app.include_router(scoring.router)
 app.include_router(feedback.router)
+app.include_router(alerts.router)
 
 
 @app.middleware("http")
