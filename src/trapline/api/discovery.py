@@ -160,6 +160,8 @@ class ProductOut(BaseModel):
     price_max: float | None
     urls: list[str]
     image: str | None = None
+    #: Produkt má připnuté hlídání na Zboží.cz.
+    has_zbozi: bool = False
     #: Ruční verdikt uživatele (like/dislike/owned) — přebíjí skóre.
     verdict: str | None = None
     matches: list[MatchOut] = []
@@ -199,7 +201,10 @@ def list_products(session: DbSession, limit: int = 200):
         }
         prices: list[float] = []
         urls: list[str] = []
+        has_zbozi = False
         for offer in product.offers:
+            if offer.source.value == "zbozi" and offer.active:
+                has_zbozi = True
             if not offer.active:
                 continue
             urls.append(offer.url)
@@ -223,6 +228,7 @@ def list_products(session: DbSession, limit: int = 200):
                 price_max=max(prices) if prices else None,
                 urls=urls,
                 image=(product.specs or {}).get("_img"),
+                has_zbozi=has_zbozi,
                 verdict=verdicts.get(product.id),
                 matches=matches_by_product.get(product.id, []),
             )
@@ -273,6 +279,7 @@ def _group_families(
                 price_max=max(prices) if prices else None,
                 urls=[u for m in members for u in m.urls],
                 image=next((m.image for m in members if m.image), None),
+                has_zbozi=any(m.has_zbozi for m in members),
                 verdict=next((m.verdict for m in members if m.verdict), None),
                 matches=sorted(best.values(), key=lambda x: x.criteria_id),
                 variant_count=len(members),

@@ -19,7 +19,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Base
+from .models import Base, Source
 
 log = logging.getLogger("trapline.db")
 
@@ -64,6 +64,35 @@ def _migrate(engine: Engine) -> None:
         with engine.begin() as conn:
             conn.execute(text(ddl))
         log.info("migrace: %s.%s přidán", table, column)
+    _migrate_source_enum(engine, inspector, tables)
+
+
+def source_enum_ddl(table: str) -> str:
+    """MODIFY podle aktuálního výčtu Source — SQLAlchemy ukládá JMÉNA členů."""
+    names = ", ".join(f"'{m.name}'" for m in Source)
+    return f"ALTER TABLE {table} MODIFY COLUMN source ENUM({names}) NOT NULL"
+
+
+def _migrate_source_enum(engine: Engine, inspector, tables: set[str]) -> None:
+    """Nový člen Source (např. ZBOZI) do nativního MySQL ENUM — create_all
+    existující sloupec nezmění a INSERT by spadl. SQLite ukládá text, tam
+    není co migrovat."""
+    if engine.dialect.name not in ("mysql", "mariadb"):
+        return
+    for table in ("offers", "listings"):
+        if table not in tables:
+            continue
+        col = next(
+            (c for c in inspector.get_columns(table) if c["name"] == "source"), None
+        )
+        if col is None:
+            continue
+        have = str(col["type"]).upper()
+        if all(m.name in have for m in Source):
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(source_enum_ddl(table)))
+        log.info("migrace: %s.source rozšířen o nové zdroje", table)
 
 
 def ensure_ready() -> bool:

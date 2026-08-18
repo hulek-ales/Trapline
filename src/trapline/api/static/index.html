@@ -313,6 +313,10 @@ const api = {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ verdict: v }),
   }).then(ok),
+  zboziAttach: (id, url) => fetch(`/api/products/${id}/zbozi`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  }).then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -415,6 +419,7 @@ async function renderTrapDetail(id) {
       <td>
         <button class="link" data-v="like" title="potvrdit — přebije skóre">👍</button>
         <button class="link" data-v="dislike" title="vyřadit — přebije skóre">👎</button>
+        <button class="link" data-z="1" title="${p.has_zbozi ? "Zboží.cz se hlídá — kliknutím přepiš URL" : "hlídat cenu přes Zboží.cz (vlož URL detailu)"}">${p.has_zbozi ? "Z✓" : "Z+"}</button>
       </td>
     </tr>`;
   }).join("");
@@ -462,6 +467,20 @@ $("td-hunt").onclick = async () => {
 };
 
 $("td-body").onclick = async (e) => {
+  const zbtn = e.target.closest("button[data-z]");
+  if (zbtn) {
+    const pid = Number(zbtn.closest("tr").dataset.pid);
+    const url = prompt("Vlož URL detailu produktu na Zboží.cz\n(https://www.zbozi.cz/vyrobek/…):");
+    if (!url) return;
+    zbtn.disabled = true;
+    try {
+      const r = await api.zboziAttach(pid, url.trim());
+      alert(`Hlídám: ${r.name}\nMin. cena teď: ${r.min_price} Kč (${r.shop_count} obchodů, nejlevnější ${r.cheapest_shop || "?"})`);
+      route();
+    } catch { alert("Nepodařilo se — zkontroluj URL."); }
+    finally { zbtn.disabled = false; }
+    return;
+  }
   const btn = e.target.closest("button[data-v]");
   if (!btn) return;
   const tr = btn.closest("tr");
