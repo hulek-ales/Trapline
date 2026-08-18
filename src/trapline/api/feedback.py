@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import jsonld_watch, transport
 from ..crawlers import zbozi
 from ..models import Offer, PriceHistory, Product, Source, UserFeedback, Verdict
 from .criteria import get_db
@@ -85,6 +86,47 @@ def detach_zbozi(product_id: int, session: DbSession):
     if offer is None:
         raise HTTPException(404, "Produkt zbozi nabídku nemá.")
     offer.active = False
+    session.commit()
+
+
+class WatchIn(BaseModel):
+    url: str
+
+
+@router.put("/{product_id}/watch")
+def attach_watch(product_id: int, payload: WatchIn, session: DbSession):
+    """Připni produktu stránku v libovolném eshopu (Alza, Datart, …) —
+    transportní vrstva ji stáhne (HTTP, při blokaci skutečný Chrome) a
+    z JSON-LD čte cenu. Obchůzka pak cenu obnovuje."""
+    product = session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Produkt neexistuje.")
+    url = payload.url.strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Čekám URL produktové stránky (https://…).")
+    try:
+        result = jsonld_watch.attach(session, product, url)
+    except transport.TransportError as exc:
+        raise HTTPException(502, f"Stránku nejde stáhnout: {exc}") from None
+    except jsonld_watch.ExtractError as exc:
+        raise HTTPException(422, str(exc)) from None
+    session.commit()
+    return result
+
+
+@router.delete("/{product_id}/watch", status_code=204)
+def detach_watch(product_id: int, session: DbSession):
+    offers = session.scalars(
+        select(Offer).where(
+            Offer.product_id == product_id,
+            Offer.source == Source.JSONLD,
+            Offer.active,
+        )
+    ).all()
+    if not offers:
+        raise HTTPException(404, "Produkt žádnou hlídanou stránku nemá.")
+    for offer in offers:
+        offer.active = False
     session.commit()
 
 

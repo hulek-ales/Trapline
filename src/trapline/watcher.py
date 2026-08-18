@@ -16,7 +16,7 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 
-from . import alerts, db, discovery, references, scoring, zbozi_watch
+from . import alerts, db, discovery, jsonld_watch, references, scoring, zbozi_watch
 from .config import settings
 
 log = logging.getLogger("trapline.watcher")
@@ -58,6 +58,11 @@ def run_cycle() -> None:
         zbozi_watch.refresh_all()
     except Exception:  # noqa: BLE001 — zbozi výpadek nesmí zastavit reference
         log.exception("obchůzka: obnova zbozi cen selhala")
+
+    try:
+        jsonld_watch.refresh_all()
+    except Exception:  # noqa: BLE001 — výpadek eshopu nesmí zastavit reference
+        log.exception("obchůzka: obnova hlídaných stránek selhala")
 
     if not db.ensure_ready():
         log.warning("obchůzka: databáze nedostupná, reference a alerty vynechány")

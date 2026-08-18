@@ -45,7 +45,7 @@ předchozímu snapshotu), ne jen nové položky.
 - [x] Discovery: Heureka XML feedy → katalog produktů s parametry (`discovery.py`, ADR-0003)
 - [x] LLM skóring produktů proti pastem (`scoring.py`, verdikt per požadavek)
 - [x] Zboží.cz watcher — ceny velkého retailu per produkt (ADR-0005)
-- [ ] JSON-LD extraktor pro retail (střední eshopy bez feedů)
+- [ ] Transportní vrstva + JSON-LD extraktor (ADR-0006), extraktory jako data + fronta úkolů (ADR-0007)
 - [ ] Sbazar / Bazoš crawler + diff pro `gone_at`
 - [ ] Allegro REST API klient (OAuth2 client_credentials)
 - [ ] LLM klasifikace bazarových inzerátů (structured output)

@@ -162,6 +162,8 @@ class ProductOut(BaseModel):
     image: str | None = None
     #: Produkt má připnuté hlídání na Zboží.cz.
     has_zbozi: bool = False
+    #: Produkt má připnutou hlídanou stránku eshopu (JSON-LD).
+    has_watch: bool = False
     #: Ruční verdikt uživatele (like/dislike/owned) — přebíjí skóre.
     verdict: str | None = None
     matches: list[MatchOut] = []
@@ -202,9 +204,12 @@ def list_products(session: DbSession, limit: int = 200):
         prices: list[float] = []
         urls: list[str] = []
         has_zbozi = False
+        has_watch = False
         for offer in product.offers:
             if offer.source.value == "zbozi" and offer.active:
                 has_zbozi = True
+            if offer.source.value == "jsonld" and offer.active:
+                has_watch = True
             if not offer.active:
                 continue
             urls.append(offer.url)
@@ -229,6 +234,7 @@ def list_products(session: DbSession, limit: int = 200):
                 urls=urls,
                 image=(product.specs or {}).get("_img"),
                 has_zbozi=has_zbozi,
+                has_watch=has_watch,
                 verdict=verdicts.get(product.id),
                 matches=matches_by_product.get(product.id, []),
             )
@@ -280,6 +286,7 @@ def _group_families(
                 urls=[u for m in members for u in m.urls],
                 image=next((m.image for m in members if m.image), None),
                 has_zbozi=any(m.has_zbozi for m in members),
+                has_watch=any(m.has_watch for m in members),
                 verdict=next((m.verdict for m in members if m.verdict), None),
                 matches=sorted(best.values(), key=lambda x: x.criteria_id),
                 variant_count=len(members),

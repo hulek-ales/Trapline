@@ -37,6 +37,10 @@ services:
       TRAPLINE_ALLEGRO_CLIENT_SECRET: ${ALLEGRO_CLIENT_SECRET:-}
       TRAPLINE_NTFY_URL: ${NTFY_URL:-https://ntfy.sh/}
       TRAPLINE_NTFY_TOPIC: ${NTFY_TOPIC:-}
+      # Serverový browser (TrueNasBrowser.yaml) pro eshopy blokující přímý
+      # HTTP fetch. Prázdné = jen přímý fetch. Token = TOKEN z browser appky.
+      TRAPLINE_BROWSER_URL: ${BROWSER_URL:-}
+      TRAPLINE_BROWSER_TOKEN: ${BROWSER_TOKEN:-}
       TRAPLINE_HOME_LAT: ${HOME_LAT:-50.5606}
       TRAPLINE_HOME_LON: ${HOME_LON:-15.9127}
       TRAPLINE_USER_AGENT: ${USER_AGENT:-Trapline/0.1 (+osobni cenovy monitor)}

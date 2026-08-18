@@ -57,6 +57,14 @@
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
   }
   .err { color: var(--warn); font-size: .88rem; }
+  #install-banner {
+    position: fixed; left: .75rem; right: .75rem; bottom: .75rem; z-index: 20;
+    display: flex; align-items: center; gap: .75rem; max-width: 40rem; margin: 0 auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: .65rem .9rem; box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: .88rem;
+  }
+  #install-banner span { flex: 1; }
+  #install-banner button.link { font-size: 1.1rem; text-decoration: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   button.link {
     background: none; border: none; color: var(--ink); opacity: .55;
@@ -236,6 +244,7 @@
       <button id="btn-score">Spustit skóring</button>
       <span class="hint" id="ollama-status" style="margin:0"></span>
     </div>
+    <p class="hint" id="browser-status" hidden></p>
     <div class="loglist" id="loglist">—</div>
   </section>
 
@@ -260,6 +269,14 @@
       Mimo Docker: po stažení je potřeba ručně restartovat API.
     </p>
   </section>
+</div>
+
+<!-- Výzva k instalaci PWA — ukáže se jen když prohlížeč instalaci nabízí
+     (Android Chrome, beforeinstallprompt) a appka ještě není na ploše. -->
+<div id="install-banner" hidden>
+  <span>Trapline si můžeš dát na plochu jako aplikaci — celá obrazovka, ikona, žádný prohlížeč okolo.</span>
+  <button id="btn-install">Nainstalovat</button>
+  <button class="link" id="btn-install-close" title="už nenabízet">×</button>
 </div>
 
 <script>
@@ -317,6 +334,21 @@ const api = {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   }).then(ok),
+  // Chyby tady nesou užitečný detail (blokace, chybějící JSON-LD) — vytáhni
+  // ho do hlášky místo holého čísla stavu.
+  watchAttach: async (id, url) => {
+    const r = await fetch(`/api/products/${id}/watch`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (r.status === 401) { showLogin(); throw new Error("401"); }
+    if (!r.ok) {
+      let detail = ""; try { detail = (await r.json()).detail || ""; } catch {}
+      throw new Error(detail || r.status);
+    }
+    return r.json();
+  },
+  browser: () => fetch("/api/system/browser").then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -420,6 +452,7 @@ async function renderTrapDetail(id) {
         <button class="link" data-v="like" title="potvrdit — přebije skóre">👍</button>
         <button class="link" data-v="dislike" title="vyřadit — přebije skóre">👎</button>
         <button class="link" data-z="1" title="${p.has_zbozi ? "Zboží.cz se hlídá — kliknutím přepiš URL" : "hlídat cenu přes Zboží.cz (vlož URL detailu)"}">${p.has_zbozi ? "Z✓" : "Z+"}</button>
+        <button class="link" data-w="1" title="${p.has_watch ? "stránka eshopu se hlídá — kliknutím přidej další" : "hlídat cenu na stránce libovolného eshopu (Alza, Datart… — vlož URL detailu)"}">${p.has_watch ? "🌐✓" : "🌐+"}</button>
       </td>
     </tr>`;
   }).join("");
@@ -467,6 +500,20 @@ $("td-hunt").onclick = async () => {
 };
 
 $("td-body").onclick = async (e) => {
+  const wbtn = e.target.closest("button[data-w]");
+  if (wbtn) {
+    const pid = Number(wbtn.closest("tr").dataset.pid);
+    const url = prompt("Vlož URL produktové stránky v eshopu\n(např. https://www.alza.cz/…):");
+    if (!url) return;
+    wbtn.disabled = true;
+    try {
+      const r = await api.watchAttach(pid, url.trim());
+      alert(`Hlídám: ${r.name}\n${r.shop}: ${r.price} ${r.currency}${r.in_stock === false ? " (není skladem)" : ""}${r.via === "browser" ? "\n(staženo přes browser — eshop blokuje přímý přístup)" : ""}`);
+      route();
+    } catch (err) { alert(`Nepodařilo se: ${err && err.message || "zkontroluj URL"}`); }
+    finally { wbtn.disabled = false; }
+    return;
+  }
   const zbtn = e.target.closest("button[data-z]");
   if (zbtn) {
     const pid = Number(zbtn.closest("tr").dataset.pid);
@@ -590,6 +637,18 @@ async function loadOllama() {
     } else {
       el.textContent = `LLM připraveno: ${o.model} @ ${o.url}`;
     }
+  } catch { /* nepřihlášen nebo API mimo */ }
+}
+
+async function loadBrowser() {
+  try {
+    const b = await api.browser();
+    const el = $("browser-status");
+    if (!b.configured) return;          // browser vypnutý → řádek vůbec neukazuj
+    el.hidden = false;
+    el.textContent = b.reachable
+      ? `Browser připraven: ${b.browser || "?"} (pro eshopy blokující přímý přístup)`
+      : `Browser nedostupný: ${b.error || "?"} — zkontroluj TrueNasBrowser app a TRAPLINE_BROWSER_URL`;
   } catch { /* nepřihlášen nebo API mimo */ }
 }
 
@@ -839,6 +898,7 @@ async function boot() {
   loadTraps();
   loadSources();
   loadOllama();
+  loadBrowser();
   loadProcs();
   loadAlerts();
   loadJobs();
@@ -928,6 +988,36 @@ route();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+// Výzva k instalaci na Android: Chrome vystřelí beforeinstallprompt, když web
+// splňuje PWA podmínky a ještě není nainstalovaný. Nativní bublinu potlačíme
+// a nabídneme vlastní banner — odmítnutí si pamatujeme, ať neotravuje.
+let installEvt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  if (localStorage.getItem("installDismissed")) return;
+  if (matchMedia("(display-mode: standalone)").matches) return;
+  installEvt = e;
+  $("install-banner").hidden = false;
+});
+$("btn-install").onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const choice = await installEvt.userChoice.catch(() => null);
+  installEvt = null;
+  $("install-banner").hidden = true;
+  if (!choice || choice.outcome !== "accepted") {
+    localStorage.setItem("installDismissed", "1");
+  }
+};
+$("btn-install-close").onclick = () => {
+  $("install-banner").hidden = true;
+  localStorage.setItem("installDismissed", "1");
+};
+window.addEventListener("appinstalled", () => {
+  installEvt = null;
+  $("install-banner").hidden = true;
+});
 </script>
 </body>
 </html>
