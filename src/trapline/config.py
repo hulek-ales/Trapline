@@ -46,6 +46,11 @@ class Settings:
         self.ntfy_url: str = _env("NTFY_URL", "https://ntfy.sh/")
         self.ntfy_topic: str = _env("NTFY_TOPIC")
 
+        # --- Watcher (pravidelná obchůzka) --------------------------------
+        #: Interval obchůzky v hodinách (discovery → skóring → reference →
+        #: alerty). 0 = plánovač vypnutý, zůstávají ruční tlačítka.
+        self.watch_hours: float = float(_env("WATCH_HOURS", "12"))
+
         # --- Crawler etiketa ---------------------------------------------
         self.user_agent: str = _env(
             "USER_AGENT", "Trapline/0.1 (+osobni cenovy monitor)"

@@ -206,6 +206,23 @@
     </form>
   </section>
 
+  <section id="alerts" hidden>
+    <div class="row">
+      <h2>Upozornění</h2>
+      <span class="meta" id="alerts-count"></span>
+    </div>
+    <p class="subject">Poslané notifikace — relevantní produkt spadl pod budget pasti.</p>
+    <p class="empty" id="alerts-empty" hidden>Zatím žádné. Obchůzka hlídá relevantní produkty proti budgetu.</p>
+    <table id="alerts-table" hidden>
+      <thead><tr><th>Kdy</th><th>Past</th><th>Produkt</th><th>Cena</th><th></th></tr></thead>
+      <tbody id="alerts-body"></tbody>
+    </table>
+    <div class="actions">
+      <button class="link" id="btn-alert-test">poslat testovací notifikaci</button>
+      <span class="msg" id="alerts-msg"></span>
+    </div>
+  </section>
+
   <section id="procs" hidden>
     <div class="row">
       <h2>Procesy a logy</h2>
@@ -214,6 +231,7 @@
     <div class="procrow"><span class="dot" id="proc-disc-dot"></span><b>Discovery</b><span class="msg" id="proc-disc"></span></div>
     <div class="procrow"><span class="dot" id="proc-score-dot"></span><b>Skóring</b><span class="msg" id="proc-score"></span></div>
     <div class="procrow"><span class="dot" id="proc-hunt-dot"></span><b>Zdroje</b><span class="msg" id="proc-hunt"></span></div>
+    <div class="procrow"><span class="dot" id="proc-watch-dot"></span><b>Obchůzka</b><span class="msg" id="proc-watch"></span></div>
     <div class="actions" style="margin:.4rem 0 .6rem">
       <button id="btn-score">Spustit skóring</button>
       <span class="hint" id="ollama-status" style="margin:0"></span>
@@ -282,6 +300,9 @@ const api = {
   scoringStatus: () => fetch("/api/scoring/status").then(ok),
   ollama:        () => fetch("/api/scoring/ollama").then(ok),
   syslog:        () => fetch("/api/system/log?limit=80").then(ok),
+  jobs:      () => fetch("/api/system/jobs").then(ok),
+  alerts:    () => fetch("/api/alerts").then(ok),
+  alertTest: () => fetch("/api/alerts/test", { method: "POST" }).then(ok),
   hunt:       (id) => fetch(`/api/discovery/hunt/${id}`, { method: "POST" }).then(ok),
   huntStatus: () => fetch("/api/discovery/hunt/status").then(ok),
   sourcePatch: (id, v) => fetch(`/api/discovery/sources/${id}`, {
@@ -331,7 +352,7 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog"]) $(id).hidden = true;
+  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog", "alerts"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
 }
 
@@ -360,6 +381,7 @@ async function renderTrapDetail(id) {
   if (!trap) { location.hash = ""; return; }
   for (const sec of SECTIONS) $(sec).hidden = true;
   $("catalog").hidden = true;
+  $("alerts").hidden = true;
   $("trap-detail").hidden = false;
   $("td-title").textContent = `Past: ${trap.name}${trap.active ? "" : " (vypnutá)"}`;
   $("td-terms").textContent = (trap.query_terms || []).join(" · ")
@@ -408,6 +430,7 @@ function route() {
   if (location.hash === "#katalog") {
     for (const sec of SECTIONS) $(sec).hidden = true;
     $("trap-detail").hidden = true;
+    $("alerts").hidden = true;
     $("catalog").hidden = false;
     loadCatalog();
     return;
@@ -452,6 +475,49 @@ $("td-body").onclick = async (e) => {
   catch { /* překreslí se příště */ }
   finally { btn.disabled = false; }
 };
+
+async function loadAlerts() {
+  let rows;
+  try { rows = await api.alerts(); } catch { return; }
+  $("alerts").hidden = false;
+  $("alerts-count").textContent = rows.length || "";
+  $("alerts-empty").hidden = rows.length > 0;
+  $("alerts-table").hidden = rows.length === 0;
+  $("alerts-body").innerHTML = rows.map((a) => {
+    const p = a.payload || {};
+    const when = a.sent_at ? new Date(a.sent_at).toLocaleString("cs") : "";
+    const link = p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">↗</a>` : "";
+    return `<tr>
+      <td style="font-size:.8rem;opacity:.65">${esc(when)}</td>
+      <td>${esc(p.trap || "")}</td>
+      <td>${esc(p.product || "")}</td>
+      <td class="num">${p.price != null ? esc(Math.round(p.price)) + " Kč" : "—"} <span class="unk">/ ${p.budget != null ? esc(Math.round(p.budget)) : "?"}</span></td>
+      <td>${link}</td>
+    </tr>`;
+  }).join("");
+}
+
+$("btn-alert-test").onclick = async () => {
+  $("alerts-msg").textContent = "Posílám…";
+  try {
+    await api.alertTest();
+    $("alerts-msg").textContent = "Odesláno — mrkni na telefon.";
+  } catch (err) {
+    $("alerts-msg").textContent = err.message === "400"
+      ? "NTFY_TOPIC není nastavený." : "Odeslání selhalo — viz logy.";
+  }
+};
+
+async function loadJobs() {
+  let j;
+  try { j = await api.jobs(); } catch { return; }
+  const job = (j.jobs || [])[0];
+  $("proc-watch").textContent = !j.watch_hours
+    ? "vypnutá (WATCH_HOURS=0)"
+    : job && job.next_run
+      ? `každých ${j.watch_hours} h — příště ${new Date(job.next_run).toLocaleString("cs")}`
+      : "plánovač neběží";
+}
 
 function fmtProc(st) {
   if (st.running) return "běží — " + (st.log.length ? st.log[st.log.length - 1] : "…");
@@ -755,6 +821,8 @@ async function boot() {
   loadSources();
   loadOllama();
   loadProcs();
+  loadAlerts();
+  loadJobs();
 }
 
 $("login-form").onsubmit = async (e) => {

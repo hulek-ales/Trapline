@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .. import logbuffer
+from .. import logbuffer, watcher
 from ..config import settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -56,6 +56,12 @@ def _guard() -> None:
         raise HTTPException(
             403, "Aktualizace přes UI nejsou povolené (UPDATE_ENABLED)."
         )
+
+
+@router.get("/jobs")
+def jobs():
+    """Naplánované úlohy obchůzky — kdy poběží příště."""
+    return {"jobs": watcher.jobs_overview(), "watch_hours": settings.watch_hours}
 
 
 @router.get("/log")

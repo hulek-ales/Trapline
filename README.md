@@ -53,7 +53,8 @@ předchozímu snapshotu), ne jen nové položky.
 - [x] DB inicializace (`db.py`, create_all) + CRUD kritérií v API a GUI
 - [ ] FastAPI backend — zbylé doménové endpointy (produkty, inzeráty, alerty)
 - [ ] React GUI + like/dislike
-- [ ] ntfy notifikace
+- [x] Watcher: obchůzka (APScheduler), retail reference, budget alerty + ntfy
+- [ ] Cenové poklesy proti baseline (s poučeními z dodatku ADR-0002)
 
 ## Vývoj
 
