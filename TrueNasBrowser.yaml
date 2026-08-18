@@ -1,0 +1,45 @@
+# Serverový browser pro Trapline (ADR-0006) — browserless/chromium.
+#
+# TrueNAS SCALE → Apps → Discover → Custom App → "Install via YAML".
+# V TrueNAS custom apps se ${PROMĚNNÉ} nedosazují — hodnoty níže před
+# instalací PŘEPIŠ přímo v YAML (hlavně TOKEN).
+#
+# K čemu to je: poslední stupeň transportní vrstvy. Eshopy, které blokují
+# obyčejný HTTP fetch na úrovni TLS fingerprints (Alza, Datart…), dostane
+# skutečný Chrome. Trapline volá REST `POST /content` (vrátí HTML po
+# vykonání JS) a případně CDP websocket pro složitější scénáře.
+#
+# Po instalaci nastav v Trapline appce (TrueNasAPP.yaml):
+#   TRAPLINE_BROWSER_URL:   http://<IP-serveru>:30061
+#   TRAPLINE_BROWSER_TOKEN: stejná hodnota jako TOKEN níže
+# Stav pak ukáže GUI → Procesy a logy ("Browser připraven: …").
+services:
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    restart: unless-stopped
+    # Chrome bez /dev/shm padá na větších stránkách — 2 GB dle ADR-0006.
+    shm_size: 2gb
+    environment:
+      # Sdílený token: bez něj by browser na LAN portu mohl použít kdokoli.
+      # PŘEPIŠ na vlastní náhodný řetězec.
+      TOKEN: zmen-me-nahodny-token
+      # Souběžné Chrome relace. 2 stačí — Trapline stránky obchází sériově
+      # s pauzami; víc jen zbytečně žere RAM na NASu.
+      CONCURRENT: "2"
+      # Fronta požadavků nad limit souběhu, než se začne odmítat.
+      QUEUED: "10"
+      # Max. délka jedné relace v ms — pomalé stránky s trackery.
+      TIMEOUT: "60000"
+      # Čeština ať eshopy vrací české ceny/verze stránek.
+      LANG: cs_CZ.UTF-8
+      TZ: Europe/Prague
+    ports:
+      - 30061:3000
+    volumes:
+      # Místo pro stažené soubory / profil, kdyby byl někdy potřeba
+      # persistentní login (přes launch arg --user-data-dir=/data/profile;
+      # pozor, persistentní profil snese jen jednu relaci najednou).
+      - browser_data:/data
+
+volumes:
+  browser_data:

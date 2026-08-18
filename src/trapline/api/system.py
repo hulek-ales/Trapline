@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .. import logbuffer, watcher
+from .. import logbuffer, transport, watcher
 from ..config import settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -62,6 +62,13 @@ def _guard() -> None:
 def jobs():
     """Naplánované úlohy obchůzky — kdy poběží příště."""
     return {"jobs": watcher.jobs_overview(), "watch_hours": settings.watch_hours}
+
+
+@router.get("/browser")
+def browser():
+    """Stav serverového browseru (browserless) — poslední stupeň transportní
+    vrstvy pro eshopy blokující obyčejný HTTP fetch (ADR-0006)."""
+    return transport.browser_status()
 
 
 @router.get("/log")

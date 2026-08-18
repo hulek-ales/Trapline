@@ -46,6 +46,13 @@ class Settings:
         self.ntfy_url: str = _env("NTFY_URL", "https://ntfy.sh/")
         self.ntfy_topic: str = _env("NTFY_TOPIC")
 
+        # --- Serverový browser (ADR-0006) --------------------------------
+        #: Základní URL browserless/chromium (TrueNasBrowser.yaml), např.
+        #: http://172.24.1.111:30061. Prázdné = poslední stupeň transportní
+        #: vrstvy (skutečný Chrome) je vypnutý a zbývá jen přímý HTTP fetch.
+        self.browser_url: str = _env("BROWSER_URL")
+        self.browser_token: str = _env("BROWSER_TOKEN")
+
         # --- Watcher (pravidelná obchůzka) --------------------------------
         #: Interval obchůzky v hodinách (discovery → skóring → reference →
         #: alerty). 0 = plánovač vypnutý, zůstávají ruční tlačítka.
@@ -83,6 +90,10 @@ class Settings:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.app_password)
+
+    @property
+    def browser_enabled(self) -> bool:
+        return bool(self.browser_url)
 
 
 settings = Settings()
