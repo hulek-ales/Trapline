@@ -57,6 +57,14 @@
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
   }
   .err { color: var(--warn); font-size: .88rem; }
+  #install-banner {
+    position: fixed; left: .75rem; right: .75rem; bottom: .75rem; z-index: 20;
+    display: flex; align-items: center; gap: .75rem; max-width: 40rem; margin: 0 auto;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: .65rem .9rem; box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: .88rem;
+  }
+  #install-banner span { flex: 1; }
+  #install-banner button.link { font-size: 1.1rem; text-decoration: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   button.link {
     background: none; border: none; color: var(--ink); opacity: .55;
@@ -261,6 +269,14 @@
       Mimo Docker: po stažení je potřeba ručně restartovat API.
     </p>
   </section>
+</div>
+
+<!-- Výzva k instalaci PWA — ukáže se jen když prohlížeč instalaci nabízí
+     (Android Chrome, beforeinstallprompt) a appka ještě není na ploše. -->
+<div id="install-banner" hidden>
+  <span>Trapline si můžeš dát na plochu jako aplikaci — celá obrazovka, ikona, žádný prohlížeč okolo.</span>
+  <button id="btn-install">Nainstalovat</button>
+  <button class="link" id="btn-install-close" title="už nenabízet">×</button>
 </div>
 
 <script>
@@ -972,6 +988,36 @@ route();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+// Výzva k instalaci na Android: Chrome vystřelí beforeinstallprompt, když web
+// splňuje PWA podmínky a ještě není nainstalovaný. Nativní bublinu potlačíme
+// a nabídneme vlastní banner — odmítnutí si pamatujeme, ať neotravuje.
+let installEvt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  if (localStorage.getItem("installDismissed")) return;
+  if (matchMedia("(display-mode: standalone)").matches) return;
+  installEvt = e;
+  $("install-banner").hidden = false;
+});
+$("btn-install").onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const choice = await installEvt.userChoice.catch(() => null);
+  installEvt = null;
+  $("install-banner").hidden = true;
+  if (!choice || choice.outcome !== "accepted") {
+    localStorage.setItem("installDismissed", "1");
+  }
+};
+$("btn-install-close").onclick = () => {
+  $("install-banner").hidden = true;
+  localStorage.setItem("installDismissed", "1");
+};
+window.addEventListener("appinstalled", () => {
+  installEvt = null;
+  $("install-banner").hidden = true;
+});
 </script>
 </body>
 </html>
