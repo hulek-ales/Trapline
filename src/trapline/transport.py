@@ -108,13 +108,21 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
             "bestAttempt": True,
             "blockConsentModals": True,
             "gotoOptions": {"waitUntil": "networkidle2", "timeout": 45000},
+            # Cloudflare/Turnstile challenge se v reálném Chromu často vyřeší
+            # sám během pár sekund — počkej, až se objeví JSON-LD cílové
+            # stránky. bestAttempt vrátí obsah i při vypršení čekání.
+            "waitForSelector": {
+                "selector": 'script[type="application/ld+json"]',
+                "timeout": 20000,
+            },
             "rejectResourceTypes": ["image", "media", "font"],
         },
         timeout=timeout,
     )
     if resp.status_code != 200:
+        # Tělo bývá validace zodu — přesně říká, který parametr se nelíbí.
         raise TransportError(
-            f"browserless vrátil HTTP {resp.status_code}: {resp.text[:200]}"
+            f"browserless vrátil HTTP {resp.status_code}: {resp.text[:300]}"
         )
     if looks_blocked(200, resp.text):
         # I skutečný Chrome dostal anti-bot stěnu — ulož ji k inspekci a
@@ -149,6 +157,9 @@ def fetch(url: str, prefer_browser: bool = False) -> Page:
     try:
         return fetch_browser(url)
     except (httpx.HTTPError, TransportError) as exc:
+        # WARNING do logbufferu — detail musí být vidět v GUI (Procesy a
+        # logy) i když HTTP odpověď cestou zamaskuje reverse proxy.
+        log.warning("transport: browser pro %s selhal: %s", url, exc)
         raise TransportError(
             f"selhal HTTP ({http_problem}) i browser ({exc})"
         ) from None
