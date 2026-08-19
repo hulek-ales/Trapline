@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from trapline import db, feedhunt
+from trapline import db, discovery, feedhunt, pagehunt, scoring
 from trapline.api.main import app
 from trapline.config import settings
 from trapline.crawlers.heureka_feed import FeedItem
@@ -105,10 +105,14 @@ def test_run_silny_nalez_auto_zapne(session, monkeypatch):
     session.add(FeedSource(name="Bestberg", url="https://www.bestberg.cz/heureka/export/products.xml"))
     session.commit()
 
+    monkeypatch.setattr(pagehunt, "hunt_trap", lambda s, t, urls: (0, 0))
+    monkeypatch.setattr(discovery, "start", lambda: True)
+    monkeypatch.setattr(scoring, "start", lambda: True)
     monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["autochladnička"])
     monkeypatch.setattr(
-        feedhunt, "search_domains",
-        lambda q: ["bestberg.cz", "novyshop.cz", "bezfeedu.cz"],
+        feedhunt, "search_urls",
+        lambda q: ["https://www.bestberg.cz/a", "https://novyshop.cz/b",
+                   "https://bezfeedu.cz/c"],
     )
     monkeypatch.setattr(
         feedhunt, "probe_domain",
@@ -134,8 +138,11 @@ def test_run_silny_nalez_auto_zapne(session, monkeypatch):
 
 def test_run_slaby_nalez_zustava_navrhem(session, monkeypatch):
     trap = _trap(session)
+    monkeypatch.setattr(pagehunt, "hunt_trap", lambda s, t, urls: (0, 0))
+    monkeypatch.setattr(discovery, "start", lambda: True)
+    monkeypatch.setattr(scoring, "start", lambda: True)
     monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
-    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["okraj.cz"])
+    monkeypatch.setattr(feedhunt, "search_urls", lambda q: ["https://okraj.cz/x"])
     monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
     monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (300, 2))
     monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
@@ -149,8 +156,11 @@ def test_run_slaby_nalez_zustava_navrhem(session, monkeypatch):
 
 def test_run_bez_prefiltru_se_nezapina(session, monkeypatch):
     trap = _trap(session, prefilter="")
+    monkeypatch.setattr(pagehunt, "hunt_trap", lambda s, t, urls: (0, 0))
+    monkeypatch.setattr(discovery, "start", lambda: True)
+    monkeypatch.setattr(scoring, "start", lambda: True)
     monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
-    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["hamakove.cz"])
+    monkeypatch.setattr(feedhunt, "search_urls", lambda q: ["https://hamakove.cz/x"])
     monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
     monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (400, 400))
     monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
@@ -165,8 +175,11 @@ def test_run_bez_prefiltru_se_nezapina(session, monkeypatch):
 def test_run_strop_auto_zapnuti(session, monkeypatch):
     trap = _trap(session)
     monkeypatch.setattr(feedhunt, "AUTO_ENABLE_MAX_PER_RUN", 1)
+    monkeypatch.setattr(pagehunt, "hunt_trap", lambda s, t, urls: (0, 0))
+    monkeypatch.setattr(discovery, "start", lambda: True)
+    monkeypatch.setattr(scoring, "start", lambda: True)
     monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
-    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["a.cz", "b.cz"])
+    monkeypatch.setattr(feedhunt, "search_urls", lambda q: ["https://a.cz/x", "https://b.cz/x"])
     monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
     monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (100, 50))
     monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
@@ -192,13 +205,13 @@ def test_run_pending_throttle(session, monkeypatch):
     monkeypatch.setattr(settings, "hunt_hours", 24.0)
     monkeypatch.setattr(
         feedhunt, "_hunt_trap",
-        lambda s, t: hunted.append(t.name) or (1, 1),
+        lambda s, t: hunted.append(t.name) or (1, 1, 0),
     )
-    assert feedhunt.run_pending() == (1, 1)
+    assert feedhunt.run_pending() == (1, 1, 0)
     assert hunted == ["Stará"]                # čerstvá i vypnutá se přeskočí
 
     monkeypatch.setattr(settings, "hunt_hours", 0.0)
-    assert feedhunt.run_pending() == (0, 0)   # vypnutý auto-hunt
+    assert feedhunt.run_pending() == (0, 0, 0)  # vypnutý auto-hunt
 
 
 def test_migrace_obsahuje_last_hunt():
@@ -209,6 +222,9 @@ def test_migrace_obsahuje_last_hunt():
 
 def test_run_preskoci_feed_bez_shody(session, monkeypatch):
     trap = _trap(session)
+    monkeypatch.setattr(pagehunt, "hunt_trap", lambda s, t, urls: (0, 0))
+    monkeypatch.setattr(discovery, "start", lambda: True)
+    monkeypatch.setattr(scoring, "start", lambda: True)
     monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
     monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["irelevantni.cz"])
     monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
