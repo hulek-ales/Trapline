@@ -85,6 +85,28 @@ def fetch_http(url: str, timeout: float = 30.0) -> Page:
     )
 
 
+def _browser_body(url: str, minimal: bool = False) -> dict:
+    body = {
+        "url": url,
+        "bestAttempt": True,
+        "gotoOptions": {"waitUntil": "networkidle2", "timeout": 45000},
+        "rejectResourceTypes": ["image", "media", "font"],
+    }
+    if not minimal:
+        # Volitelná pole novějších verzí browserless — starší build je při
+        # validaci těla odmítne celé („must NOT have additional properties"),
+        # proto je fetch_browser umí při 400 zahodit a zkusit to bez nich.
+        body["blockConsentModals"] = True
+        # Cloudflare/Turnstile challenge se v reálném Chromu často vyřeší
+        # sám během pár sekund — počkej, až se objeví JSON-LD cílové
+        # stránky. bestAttempt vrátí obsah i při vypršení čekání.
+        body["waitForSelector"] = {
+            "selector": 'script[type="application/ld+json"]',
+            "timeout": 20000,
+        }
+    return body
+
+
 def fetch_browser(url: str, timeout: float = 60.0) -> Page:
     """Stáhne stránku skutečným Chromem přes browserless ``POST /content``.
 
@@ -101,26 +123,16 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
     # a spol.) — bez něj velcí prodejci servírují challenge i browseru.
     params["launch"] = json.dumps({"stealth": True})
     resp = httpx.post(
-        f"{base}/content",
-        params=params,
-        json={
-            "url": url,
-            "bestAttempt": True,
-            "blockConsentModals": True,
-            "gotoOptions": {"waitUntil": "networkidle2", "timeout": 45000},
-            # Cloudflare/Turnstile challenge se v reálném Chromu často vyřeší
-            # sám během pár sekund — počkej, až se objeví JSON-LD cílové
-            # stránky. bestAttempt vrátí obsah i při vypršení čekání.
-            "waitForSelector": {
-                "selector": 'script[type="application/ld+json"]',
-                "timeout": 20000,
-            },
-            "rejectResourceTypes": ["image", "media", "font"],
-        },
-        timeout=timeout,
+        f"{base}/content", params=params, json=_browser_body(url), timeout=timeout
     )
+    if resp.status_code == 400 and "additional properties" in resp.text:
+        log.info("transport: browserless nezná volitelná pole, zkouším bez nich")
+        resp = httpx.post(
+            f"{base}/content", params=params,
+            json=_browser_body(url, minimal=True), timeout=timeout,
+        )
     if resp.status_code != 200:
-        # Tělo bývá validace zodu — přesně říká, který parametr se nelíbí.
+        # Tělo bývá validace — přesně říká, který parametr se nelíbí.
         raise TransportError(
             f"browserless vrátil HTTP {resp.status_code}: {resp.text[:300]}"
         )
