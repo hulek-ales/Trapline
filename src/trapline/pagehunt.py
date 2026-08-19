@@ -6,17 +6,22 @@ i Alza) a z JSON-LD se vytáhne Product. Co projde předfiltrem pasti, uloží
 se do katalogu jako nabídka ``source=jsonld`` — stejný tvar jako ruční 🌐+,
 takže obchůzka cenu obnovuje a skóring produkt třídí úplně automaticky.
 
-Stránky bez Productu se zkusí rozbalit jako kategorie: JSON-LD ItemList
-nese URL detailů (hloubka 1). Stropy drží zátěž na osobní úrovni: max
-stránek na běh, max na doménu, pauzy mezi požadavky, respekt k robots.txt.
+Stránky bez Productu se zkusí rozbalit jako kategorie: nejdřív JSON-LD
+ItemList, a když chybí (Alza kreslí výpisy JS bez značek), heuristika nad
+HTML — odkazy tvaru produktového detailu (…-d123.htm, /produkt/…) na téže
+doméně + stránkování přes <link rel="next">. Stropy drží zátěž na osobní
+úrovni: max stránek na běh, max na doménu, pauzy, respekt k robots.txt.
 """
 
 from __future__ import annotations
 
+import html as htmlmod
 import logging
+import re
 import time
 import urllib.robotparser
 from datetime import UTC, datetime
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from sqlalchemy import select
@@ -47,13 +52,55 @@ BLACKLIST = frozenset({
     "medium.com",
 })
 
-#: Stropy jednoho běhu — osobní nasazení, ne plošný scraping.
-MAX_PAGES = 30
-MAX_PER_DOMAIN = 5
+#: Stropy jednoho běhu — osobní nasazení, ne plošný scraping. Vyšší limit
+#: na doménu má smysl od chvíle, kdy umíme rozbalit kategorii velkého
+#: řetězce na detaily (Alza kategorie = desítky produktů).
+MAX_PAGES = 40
+MAX_PER_DOMAIN = 12
 MAX_ITEMLIST_URLS = 10
+MAX_DETAIL_LINKS = 20
 #: Od kolika položek ItemList je stránka kategorie (její vlastní Product
 #: markup je jen obecný souhrn — neukládat).
 CATEGORY_MIN_ITEMS = 3
+
+#: URL cesty, které vypadají jako produktový detail. Záměrně konzervativní
+#: — falešný kandidát stojí jen jeden (ohraničený) fetch, ale moc široký
+#: vzor by budget domény spálil na článcích a filtrech.
+_DETAIL_PATTERNS = (
+    re.compile(r"-d\d+\.htm$"),      # alza.cz
+    re.compile(r"/p/\d+"),           # mall.cz a spol.
+    re.compile(r"/produkt[y]?/."),
+    re.compile(r"/product[s]?/."),
+    re.compile(r"/zbozi/."),
+)
+
+_HREF = re.compile(r'href="([^"]+)"')
+_REL_NEXT_TAG = re.compile(r"<link\b[^>]*>", re.I)
+
+
+def detail_links(html: str, base_url: str) -> list[str]:
+    """Odkazy tvaru produktového detailu na téže doméně, v pořadí výskytu."""
+    base_dom = transport.domain_of(base_url)
+    out: list[str] = []
+    for href in _HREF.findall(html):
+        url = urljoin(base_url, htmlmod.unescape(href))
+        if transport.domain_of(url) != base_dom:
+            continue
+        path = urlsplit(url).path
+        if any(p.search(path) for p in _DETAIL_PATTERNS) and url not in out:
+            out.append(url)
+    return out
+
+
+def next_page(html: str, base_url: str) -> str | None:
+    """Další stránka výpisu z ``<link rel="next">`` (SEO standard výpisů)."""
+    for tag in _REL_NEXT_TAG.findall(html):
+        if 'rel="next"' not in tag and "rel='next'" not in tag:
+            continue
+        m = re.search(r'href=["\']([^"\']+)["\']', tag)
+        if m:
+            return urljoin(base_url, htmlmod.unescape(m.group(1)))
+    return None
 
 #: Cache robots.txt per doména na dobu života procesu.
 _robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
@@ -157,6 +204,17 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
     pages = found = 0
     per_domain: dict[str, int] = {}
     seen = set(queue)
+
+    def _enqueue(candidates: list[str], dom: str) -> None:
+        for extra in candidates:
+            if (
+                transport.domain_of(extra) == dom
+                and extra not in seen
+                and extra not in known
+            ):
+                seen.add(extra)
+                queue.append(extra)
+
     i = 0
     while i < len(queue) and pages < MAX_PAGES:
         url = queue[i]
@@ -178,26 +236,19 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
 
         product = jsonld.best(page.text)
         lists = jsonld.item_urls(page.text)
-        # Stránka kategorie často nese i obecný Product („Hamaky — od 120 Kč")
-        # — s větším ItemList ji ber jako mapu na detaily, ne jako produkt.
-        if len(lists) >= CATEGORY_MIN_ITEMS:
+        # Stránka kategorie často nese i obecný Product („Hamaky — od 120 Kč",
+        # „Kompresorové chladničky — od 4229 Kč"). Poznávací znamení: větší
+        # ItemList, nebo chybějící značka/EAN/SKU (skutečný detail je má
+        # prakticky vždy). Takovou stránku ber jako mapu, ne jako produkt.
+        if product is not None and (
+            len(lists) >= CATEGORY_MIN_ITEMS
+            or not (product.brand or product.ean or product.sku)
+        ):
             product = None
         if product is not None and product.price and product.name:
             if product.currency and product.currency.upper() not in ("CZK", "KČ"):
                 continue
             if not passes_prefilter(trap, product):
-                continue
-            if not (product.brand or product.ean or product.sku):
-                # Souhrnný Product kategorie („Kompresorové chladničky —
-                # od 4229 Kč") nenese značku ani EAN/SKU — skutečný detail
-                # prakticky vždy aspoň jedno má.
-                for extra in lists[:MAX_ITEMLIST_URLS]:
-                    if (
-                        transport.domain_of(extra) == dom
-                        and extra not in seen and extra not in known
-                    ):
-                        seen.add(extra)
-                        queue.append(extra)
                 continue
             row = discovery._upsert_product(session, _to_item(product, url))
             _upsert_offer(session, row.id, product, url)
@@ -209,15 +260,20 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
             )
             continue
 
-        # Bez Productu: zkus stránku rozbalit jako kategorii (ItemList).
-        for extra in lists[:MAX_ITEMLIST_URLS]:
-            if (
-                transport.domain_of(extra) == dom
-                and extra not in seen
-                and extra not in known
-            ):
-                seen.add(extra)
-                queue.append(extra)
+        # Bez Productu: rozbal stránku jako kategorii — nejdřív JSON-LD
+        # ItemList, bez něj heuristika nad HTML (Alza a spol. kreslí výpisy
+        # JS bez značek, ale odkazy na detaily v HTML jsou).
+        if lists:
+            _enqueue(lists[:MAX_ITEMLIST_URLS], dom)
+        else:
+            details = detail_links(page.text, page.final_url or url)
+            _enqueue(details[:MAX_DETAIL_LINKS], dom)
+            lists = details  # kvůli stránkování níže
+        # Výpis s nálezy pokračuje na další stránce (<link rel="next">).
+        if lists:
+            nxt = next_page(page.text, page.final_url or url)
+            if nxt:
+                _enqueue([nxt], dom)
 
     feedhunt._note(
         f"crawler stránek: {pages} staženo, {found} produktů do katalogu"
