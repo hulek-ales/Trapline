@@ -2,8 +2,10 @@
 
 „Nastraž jednou, pak jen obcházej" — APScheduler spouští cyklus každých
 ``WATCH_HOURS`` hodin (0 = vypnuto, zůstávají ruční tlačítka). První běh je
-až za celý interval: self-update restartuje proces často a okamžitý běh po
-každém restartu by zbytečně mlátil do zdrojů i GPU.
+10 minut po startu: dřív byl až za celý interval, jenže self-update
+restartuje proces tak často, že se cyklus věčně odsouval a nikdy neproběhl.
+Brzký běh je dnes levný — každá fáze má vlastní throttle (hunt per past
+přes last_hunt, skóring přeskakuje stejné criteria_rev, feedů je pár).
 
 Cyklus čeká na doběhnutí každé fáze (discovery i skóring jedou ve vlastních
 vláknech se zámky) — když fáze visí přes limit, cyklus to vzdá a nechá
@@ -111,7 +113,7 @@ def start() -> None:
         hours=settings.watch_hours,
         id="obchuzka",
         name="Obchůzka (discovery → skóring → reference → alerty)",
-        next_run_time=datetime.now(UTC) + timedelta(hours=settings.watch_hours),
+        next_run_time=datetime.now(UTC) + timedelta(minutes=10),
         max_instances=1,
         coalesce=True,
     )

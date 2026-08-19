@@ -335,3 +335,43 @@ def test_products_filtr_podle_pasti(client, monkeypatch):
     ).json()
     assert [r["id"] for r in moje] == [scored_id]
     assert moje[0]["matches"][0]["criteria_id"] == trap_id
+
+
+def test_model_codes():
+    mc = discovery.model_codes
+    assert mc("Přenosná autochladnička BestBerg BBPF-30A / 30 l") == {"30a"}
+    assert mc("BestBerg BBPF-30A autochladnička do auta 30 litrů") == {"30a"}
+    # čísla s jednotkou nejsou kód modelu
+    assert mc("Ultralehký titanový hrnec 750ml") == frozenset()
+    assert mc("Chladnička 12V 230V 30 l") == frozenset()
+    assert mc("Chladnička BestBerg BBFR-95X") == {"95x"}
+
+
+def test_upsert_sloucí_ruzne_nazvy_napric_obchody(client, monkeypatch):
+    """Dva obchody, jiný slovosled názvu, žádný EAN — spojí značka + kód."""
+    from trapline.crawlers.heureka_feed import FeedItem as FI
+
+    a = FI(item_id="a1", name="Přenosná autochladnička BestBerg BBPF-30A / 30 l",
+           url="https://a.example/p", price=5699.0, manufacturer="BestBerg")
+    b = FI(item_id="b1", name="BESTBERG BBPF-30A autochladnička do auta 30 litrů",
+           url="https://b.example/p", price=5490.0, manufacturer="BESTBERG")
+    with Session(db._engine) as s:
+        pa = discovery._upsert_product(s, a)
+        s.commit()
+        pb = discovery._upsert_product(s, b)
+        s.commit()
+        assert pa.id == pb.id                  # jeden produkt, dva obchody
+        # jiný kód téže značky se nespojí
+        c = FI(item_id="c1", name="BestBerg BBPF-40A autochladnička 40 l",
+               url="https://c.example/p", price=5990.0, manufacturer="BestBerg")
+        pc = discovery._upsert_product(s, c)
+        assert pc.id != pa.id
+        # bez spolehlivého kódu (jen jednotky) se nespojuje
+        d = FI(item_id="d1", name="BestBerg termobox 30 l",
+               url="https://d.example/p", price=990.0, manufacturer="BestBerg")
+        e = FI(item_id="e1", name="BestBerg chladicí taška 30 l",
+               url="https://e.example/p", price=590.0, manufacturer="BestBerg")
+        pd_ = discovery._upsert_product(s, d)
+        s.commit()
+        pe = discovery._upsert_product(s, e)
+        assert pd_.id != pe.id
