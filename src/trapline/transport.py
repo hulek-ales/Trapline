@@ -19,6 +19,7 @@ do ``data/failures/`` k ruční inspekci — nikdy do DB.
 from __future__ import annotations
 
 import gzip
+import json
 import logging
 import re
 import time
@@ -93,13 +94,19 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
     if not settings.browser_enabled:
         raise TransportError("browser není nakonfigurovaný (TRAPLINE_BROWSER_URL)")
     base = settings.browser_url.rstrip("/")
-    params = {"token": settings.browser_token} if settings.browser_token else {}
+    params: dict[str, str] = {}
+    if settings.browser_token:
+        params["token"] = settings.browser_token
+    # Stealth maskuje nejběžnější detekce headless Chromu (navigator.webdriver
+    # a spol.) — bez něj velcí prodejci servírují challenge i browseru.
+    params["launch"] = json.dumps({"stealth": True})
     resp = httpx.post(
         f"{base}/content",
         params=params,
         json={
             "url": url,
             "bestAttempt": True,
+            "blockConsentModals": True,
             "gotoOptions": {"waitUntil": "networkidle2", "timeout": 45000},
             "rejectResourceTypes": ["image", "media", "font"],
         },
@@ -108,6 +115,14 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
     if resp.status_code != 200:
         raise TransportError(
             f"browserless vrátil HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    if looks_blocked(200, resp.text):
+        # I skutečný Chrome dostal anti-bot stěnu — ulož ji k inspekci a
+        # ohlas poctivě, ať se to neplete s „stránka nenese JSON-LD".
+        saved = save_failure(domain_of(url) + "-browser", resp.text)
+        raise TransportError(
+            "eshop blokuje i skutečný Chrome (challenge/captcha)"
+            + (f"; HTML uloženo: {saved}" if saved else "")
         )
     return Page(url=url, final_url=url, status=200, text=resp.text, via="browser")
 

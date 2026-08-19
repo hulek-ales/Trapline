@@ -8,13 +8,16 @@ a vyzve k ručnímu restartu.
 
 from __future__ import annotations
 
+import gzip
 import os
+import re
 import subprocess
 import threading
 import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from .. import logbuffer, transport, watcher
 from ..config import settings
@@ -69,6 +72,39 @@ def browser():
     """Stav serverového browseru (browserless) — poslední stupeň transportní
     vrstvy pro eshopy blokující obyčejný HTTP fetch (ADR-0006)."""
     return transport.browser_status()
+
+
+_FAILURE_NAME = re.compile(r"[a-z0-9._-]+\.html\.gz")
+
+
+def _failures_dir() -> Path:
+    return Path(settings.snapshot_dir) / "failures"
+
+
+@router.get("/failures")
+def failures_list():
+    """Tichá selhání extrakce (ADR-0007) — stránky, ze kterých nešla vytáhnout
+    data. Nejnovější první; obsah vrací /failures/{name}."""
+    folder = _failures_dir()
+    if not settings.snapshot_dir or not folder.is_dir():
+        return {"items": []}
+    return {"items": [
+        {"name": p.name, "size": p.stat().st_size}
+        for p in sorted(folder.glob("*.html.gz"), reverse=True)
+    ]}
+
+
+@router.get("/failures/{name}")
+def failure_detail(name: str):
+    """Rozbalené HTML jednoho selhání — na pohled, co eshop doopravdy vrátil
+    (challenge? consent stěna? jiná struktura?)."""
+    if not _FAILURE_NAME.fullmatch(name):
+        raise HTTPException(404, "Neznámý soubor.")
+    path = _failures_dir() / name
+    if not settings.snapshot_dir or not path.is_file():
+        raise HTTPException(404, "Neznámý soubor.")
+    html = gzip.decompress(path.read_bytes()).decode("utf-8", "replace")
+    return PlainTextResponse(html)
 
 
 @router.get("/log")
