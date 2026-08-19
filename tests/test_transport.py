@@ -38,6 +38,7 @@ def test_fetch_bez_browseru_hlasi_blokaci(monkeypatch):
 
 def test_fetch_eskaluje_na_browser(monkeypatch):
     monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport, "_browser_first", set())
     monkeypatch.setattr(
         transport, "fetch_http",
         lambda url, timeout=30.0: transport.Page(url, url, 403, "denied", "http"),
@@ -53,6 +54,7 @@ def test_fetch_eskaluje_na_browser(monkeypatch):
 
 def test_fetch_ok_browser_nevola(monkeypatch):
     monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport, "_browser_first", set())
     monkeypatch.setattr(
         transport, "fetch_http",
         lambda url, timeout=30.0: transport.Page(url, url, 200, "<b>ok</b>", "http"),
@@ -70,6 +72,7 @@ def test_fetch_sitova_chyba_eskaluje(monkeypatch):
         raise httpx.ConnectError("connection reset")
 
     monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport, "_browser_first", set())
     monkeypatch.setattr(transport, "fetch_http", _reset)
     monkeypatch.setattr(
         transport, "fetch_browser",
@@ -264,3 +267,29 @@ def test_failures_endpointy(monkeypatch, tmp_path):
     from trapline.api.system import _FAILURE_NAME
     assert not _FAILURE_NAME.fullmatch("../x.html.gz")
     assert not _FAILURE_NAME.fullmatch("a/b.html.gz")
+
+
+def test_blokovana_domena_jde_priste_rovnou_na_browser(monkeypatch):
+    monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport, "_browser_first", set())
+    monkeypatch.setattr(
+        transport, "fetch_http",
+        lambda url, timeout=30.0: transport.Page(url, url, 403, "denied", "http"),
+    )
+    monkeypatch.setattr(
+        transport, "fetch_browser",
+        lambda url, timeout=60.0: transport.Page(url, url, 200, "ok", "browser"),
+    )
+    assert transport.fetch("https://www.alza.cz/a-d1.htm").via == "browser"
+    # druhé volání na tutéž doménu už HTTP stupeň přeskočí
+    monkeypatch.setattr(
+        transport, "fetch_http",
+        lambda url, timeout=30.0: pytest.fail("HTTP se už nemá zkoušet"),
+    )
+    assert transport.fetch("https://www.alza.cz/b-d2.htm").via == "browser"
+    # jiná doména jede normálně od HTTP
+    monkeypatch.setattr(
+        transport, "fetch_http",
+        lambda url, timeout=30.0: transport.Page(url, url, 200, "ok", "http"),
+    )
+    assert transport.fetch("https://jinde.example/x").via == "http"

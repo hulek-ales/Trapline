@@ -89,6 +89,11 @@ def fetch_http(url: str, timeout: float = 30.0) -> Page:
 #: jinak by každé volání pálilo dva POSTy.
 _browser_wants_minimal = False
 
+#: Domény, kde přímý HTTP fetch narazil na blokaci a browser uspěl — příště
+#: se HTTP stupeň přeskakuje. Cache na život procesu: krájet Alzu po jedné
+#: zbytečné 403 na každou stránku je hluk v logu i promarněný request.
+_browser_first: set[str] = set()
+
 
 def _browser_body(url: str, minimal: bool = False) -> dict:
     body = {
@@ -158,8 +163,11 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
 
 def fetch(url: str, prefer_browser: bool = False) -> Page:
     """Žebřík HTTP → browser. Vyhazuje TransportError, když selžou oba stupně
-    (nebo jediný dostupný)."""
-    if prefer_browser and settings.browser_enabled:
+    (nebo jediný dostupný). Doména se zapamatovanou blokací jde rovnou na
+    browser."""
+    if settings.browser_enabled and (
+        prefer_browser or domain_of(url) in _browser_first
+    ):
         return fetch_browser(url)
 
     http_problem: str | None = None
@@ -176,7 +184,12 @@ def fetch(url: str, prefer_browser: bool = False) -> Page:
         raise TransportError(f"přímý fetch selhal ({http_problem}), browser vypnutý")
     log.info("transport: %s — %s, eskaluji na browser", url, http_problem)
     try:
-        return fetch_browser(url)
+        page = fetch_browser(url)
+        dom = domain_of(url)
+        if dom not in _browser_first:
+            _browser_first.add(dom)
+            log.info("transport: %s — příště rovnou přes browser", dom)
+        return page
     except (httpx.HTTPError, TransportError) as exc:
         # WARNING do logbufferu — detail musí být vidět v GUI (Procesy a
         # logy) i když HTTP odpověď cestou zamaskuje reverse proxy.
