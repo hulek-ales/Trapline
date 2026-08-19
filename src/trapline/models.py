@@ -108,6 +108,9 @@ class Criteria(Base):
     soft: Mapped[dict] = mapped_column(JSON, default=dict)
     budget_max: Mapped[float | None] = mapped_column(Float)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Kdy pro past naposledy běželo hledání zdrojů (feedhunt) — obchůzka ho
+    #: opakuje nejdřív po HUNT_HOURS. NULL = ještě nikdy.
+    last_hunt: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

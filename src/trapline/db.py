@@ -49,6 +49,11 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
         "prefilter",
         "ALTER TABLE criteria ADD COLUMN prefilter VARCHAR(500) NOT NULL DEFAULT ''",
     ),
+    (
+        "criteria",
+        "last_hunt",
+        "ALTER TABLE criteria ADD COLUMN last_hunt DATETIME NULL",
+    ),
 ]
 
 

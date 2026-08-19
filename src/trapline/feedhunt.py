@@ -3,8 +3,14 @@
 Ruční postup (vygooglit obchody, zkusit /heureka.xml) automatizovaný 1:1.
 LLM odvodí z pasti hledací fráze, SearXNG vrátí eshopy, u každé domény se
 zkusí obvyklé cesty veřejných Heureka feedů a nalezené feedy se spočítají
-proti předfiltru pasti. Výsledek se zakládá jako VYPNUTÝ zdroj s poznámkou
-— uživatel v GUI rozhodne, co povolit; nic se nestahuje bez jeho souhlasu.
+proti předfiltru pasti.
+
+Silné nálezy (past má předfiltr a projde jím dost položek) se rovnou
+ZAPÍNAJÍ — obchůzka je pak volá přes ``run_pending()`` a noví prodejci
+i produkty přibývají bez klikání. Slabé nálezy a nálezy pastí bez
+předfiltru zůstávají vypnuté návrhy: bez levného filtru by zapnutí feedu
+vysypalo do katalogu celý sortiment obchodu a LLM by skóroval stovky
+nesouvisejících položek.
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ import logging
 import re
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 import httpx
@@ -49,6 +55,11 @@ DOMAIN_BLACKLIST = frozenset({
 
 #: Kolik domén z výsledků hledání maximálně oťukat v jednom běhu.
 MAX_CANDIDATES = 15
+
+#: Auto-zapnutí: minimum položek prošlých předfiltrem pasti (slabší nález
+#: zůstane vypnutým návrhem) a strop nově zapnutých zdrojů na jeden běh.
+AUTO_ENABLE_MIN_MATCHING = 3
+AUTO_ENABLE_MAX_PER_RUN = 5
 
 _QUERY_SCHEMA = {
     "type": "object",
@@ -195,6 +206,81 @@ def evaluate_feed(url: str, trap: Criteria) -> tuple[int, int]:
     return len(items), matching
 
 
+def _hunt_trap(session, trap: Criteria) -> tuple[int, int]:
+    """Jeden lov pro jednu past. Vrací (nových zdrojů, z toho auto-zapnutých).
+
+    Commituje průběžně po každém nálezu a na konci razítkuje
+    ``trap.last_hunt`` — throttle pro obchůzku.
+    """
+    known = {_domain(s.url) for s in session.scalars(select(FeedSource))}
+    _note(f"past „{trap.name}“: odvozuji hledací fráze")
+    queries = derive_queries(trap)
+    _note("fráze: " + ", ".join(queries))
+    domains = [d for d in search_domains(queries) if d not in known]
+    domains = domains[:MAX_CANDIDATES]
+    _note(f"kandidátů k oťukání: {len(domains)}")
+
+    found = enabled = 0
+    for i, domain in enumerate(domains):
+        if i:
+            time.sleep(settings.request_delay_s)
+        feed_url = probe_domain(domain)
+        if not feed_url:
+            continue
+        try:
+            total, matching = evaluate_feed(feed_url, trap)
+        except Exception as exc:  # noqa: BLE001
+            _note(f"{domain}: feed nejde přečíst ({exc})")
+            continue
+        if matching == 0:
+            _note(f"{domain}: feed OK, ale 0 položek odpovídá — přeskakuji")
+            continue
+        auto = (
+            bool(trap.prefilter)
+            and matching >= AUTO_ENABLE_MIN_MATCHING
+            and enabled < AUTO_ENABLE_MAX_PER_RUN
+        )
+        if auto:
+            status_text = (
+                f"auto-zapnuto z pasti „{trap.name}“: {matching}/{total} "
+                "položek odpovídá — vypni v sekci Zdroje, pokud nesedí"
+            )
+        elif not trap.prefilter:
+            status_text = (
+                f"návrh z pasti „{trap.name}“: {matching}/{total} položek — "
+                "past nemá předfiltr, bez něj se auto-nezapíná (celý sortiment)"
+            )
+        else:
+            status_text = (
+                f"návrh z pasti „{trap.name}“: {matching}/{total} "
+                "položek odpovídá — povol a spusť discovery"
+            )
+        session.add(FeedSource(
+            name=domain,
+            url=feed_url,
+            category_filter=trap.prefilter or "",
+            enabled=auto,
+            last_status=status_text,
+        ))
+        session.commit()
+        found += 1
+        enabled += 1 if auto else 0
+        _note(
+            f"{domain}: NALEZEN feed, {matching}/{total} položek odpovídá"
+            + (" → auto-zapnut" if auto else "")
+        )
+    # Naivní UTC jako zbytek schématu (server_default func.now()) — ať jde
+    # sloupec porovnávat s cutoffem bez tanců kolem timezone.
+    trap.last_hunt = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
+    _note(
+        f"past „{trap.name}“ hotová: {found} nových zdrojů, "
+        f"{enabled} auto-zapnutých"
+        + (" — návrhy povol v sekci Zdroje" if found > enabled else "")
+    )
+    return found, enabled
+
+
 def _run(criteria_id: int) -> None:
     try:
         if not db.ensure_ready():
@@ -205,53 +291,58 @@ def _run(criteria_id: int) -> None:
             if trap is None:
                 _note("past neexistuje")
                 return
-            known = {
-                _domain(s.url)
-                for s in session.scalars(select(FeedSource))
-            }
-            _note(f"past „{trap.name}“: odvozuji hledací fráze")
-            queries = derive_queries(trap)
-            _note("fráze: " + ", ".join(queries))
-            domains = [d for d in search_domains(queries) if d not in known]
-            domains = domains[:MAX_CANDIDATES]
-            _note(f"kandidátů k oťukání: {len(domains)}")
-
-            found = 0
-            for i, domain in enumerate(domains):
-                if i:
-                    time.sleep(settings.request_delay_s)
-                feed_url = probe_domain(domain)
-                if not feed_url:
-                    continue
-                try:
-                    total, matching = evaluate_feed(feed_url, trap)
-                except Exception as exc:  # noqa: BLE001
-                    _note(f"{domain}: feed nejde přečíst ({exc})")
-                    continue
-                if matching == 0:
-                    _note(f"{domain}: feed OK, ale 0 položek odpovídá — přeskakuji")
-                    continue
-                session.add(FeedSource(
-                    name=domain,
-                    url=feed_url,
-                    category_filter=trap.prefilter or "",
-                    enabled=False,
-                    last_status=(
-                        f"návrh z pasti „{trap.name}“: {matching}/{total} "
-                        "položek odpovídá — povol a spusť discovery"
-                    ),
-                ))
-                session.commit()
-                found += 1
-                _note(f"{domain}: NALEZEN feed, {matching}/{total} položek odpovídá")
-            _note(
-                f"hotovo: {found} nových návrhů zdrojů"
-                + (" — povol je v sekci Zdroje" if found else "")
-            )
+            _hunt_trap(session, trap)
     finally:
         with _lock:
             _state["running"] = False
             _state["finished"] = datetime.now(UTC).isoformat()
+
+
+def run_pending() -> tuple[int, int]:
+    """Obchůzka: lov pro každou aktivní past, jejíž poslední hunt je starší
+    než HUNT_HOURS. Běží synchronně (volá se z vlákna obchůzky) a vrací
+    (nových zdrojů, auto-zapnutých). Nově zapnuté feedy stáhne discovery
+    hned v témže cyklu."""
+    if settings.hunt_hours <= 0 or not settings.searxng_url:
+        return 0, 0
+    with _lock:
+        if _state["running"]:
+            return 0, 0
+        _state.update(
+            running=True,
+            started=datetime.now(UTC).isoformat(),
+            finished=None,
+            log=[],
+        )
+    found = enabled = 0
+    try:
+        if not db.ensure_ready():
+            _note("databáze není dostupná — běh se ruší")
+            return 0, 0
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+            hours=settings.hunt_hours
+        )
+        with db.open_session() as session:
+            traps = session.scalars(
+                select(Criteria).where(Criteria.active)
+            ).all()
+            due = [
+                t for t in traps
+                if t.last_hunt is None or t.last_hunt < cutoff
+            ]
+            if not due:
+                _note("žádná past nemá hunt na řadě")
+                return 0, 0
+            _note(f"automatický hunt: {len(due)} pastí na řadě")
+            for trap in due:
+                f, e = _hunt_trap(session, trap)
+                found += f
+                enabled += e
+    finally:
+        with _lock:
+            _state["running"] = False
+            _state["finished"] = datetime.now(UTC).isoformat()
+    return found, enabled
 
 
 def start(criteria_id: int) -> bool:
