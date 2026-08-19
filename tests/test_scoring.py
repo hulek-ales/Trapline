@@ -311,3 +311,20 @@ def test_ollama_diag_hlasi_bezici_modely(client, monkeypatch):
     ])
     body = client.get("/api/scoring/ollama").json()
     assert body["running"][0]["vram_pct"] == 50  # půlka modelu na CPU
+
+
+def test_prefiltr_chyta_i_popis():
+    """Anglicky pojmenovaný produkt („Hammock") projde přes český popis."""
+    from trapline.models import Criteria, Product
+    from trapline.scoring import passes_prefilter
+
+    trap = Criteria(name="Hamaka", query_terms=["x"],
+                    prefilter="hamak, houpací síť")
+    product = Product(
+        brand="ENO", model="DoubleNest", model_norm="doublenest",
+        title="DoubleNest",
+        specs={"_popis": "Prostorná houpací síť pro dva."},
+    )
+    assert passes_prefilter(trap, product)
+    product.specs = {}
+    assert not passes_prefilter(trap, product)
