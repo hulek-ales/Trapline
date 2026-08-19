@@ -73,6 +73,7 @@ CATEGORY_MIN_ITEMS = 3
 #: vzor by budget domény spálil na článcích a filtrech.
 _DETAIL_PATTERNS = (
     re.compile(r"-d\d+\.htm$"),      # alza.cz
+    re.compile(r"~p\d+$"),           # odkarla.cz
     re.compile(r"/p/\d+"),           # mall.cz a spol.
     re.compile(r"/produkt[y]?/."),
     re.compile(r"/product[s]?/."),

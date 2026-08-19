@@ -16,8 +16,10 @@ from ..models import (
     Criteria,
     CriteriaMatch,
     FeedSource,
+    Offer,
     PriceHistory,
     Product,
+    Source,
     UserFeedback,
 )
 from .criteria import get_db
@@ -137,6 +139,31 @@ def hunt(criteria_id: int, session: DbSession):
 @router.get("/hunt/status")
 def hunt_status():
     return feedhunt.status()
+
+
+@router.get("/crawled-shops")
+def crawled_shops(session: DbSession):
+    """Obchody pokryté crawlerem (source=jsonld) — nemají feed, jejich
+    produkty se hlídají po jednotlivých stránkách. Informativní přehled
+    do sekce Zdroje."""
+    rows = session.execute(
+        select(
+            Offer.shop,
+            func.count(Offer.id),
+            func.max(Offer.last_checked),
+        )
+        .where(Offer.source == Source.JSONLD, Offer.active)
+        .group_by(Offer.shop)
+        .order_by(func.count(Offer.id).desc())
+    ).all()
+    return [
+        {
+            "shop": shop,
+            "products": count,
+            "last_checked": last.isoformat() if last else None,
+        }
+        for shop, count, last in rows
+    ]
 
 
 # --- produkty --------------------------------------------------------------
