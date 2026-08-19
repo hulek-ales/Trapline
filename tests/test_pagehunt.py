@@ -168,3 +168,25 @@ def test_itemlist_parser():
              "</script></html>")
     assert jsonld.item_urls(html2) == ["https://s.example/c"]
     assert jsonld.item_urls("<html>nic</html>") == []
+
+
+def test_kategorie_s_vlastnim_productem_se_neuklada(session, monkeypatch):
+    """Stránka kategorie nese obecný Product („Hamaky — od 120 Kč") i větší
+    ItemList — ukládat se mají jen detaily, ne souhrn."""
+    trap = _trap(session, prefilter="hamak")
+    details = [f"https://shop.example/hamaka-{i}" for i in range(3)]
+    category = ('<html><script type="application/ld+json">'
+                '{"@type": "Product", "name": "Hamaky",'
+                ' "offers": {"price": 120, "priceCurrency": "CZK"}}'
+                "</script>" + _category_page(details)[6:])
+    pages = {"https://shop.example/kategorie": category}
+    pages.update({u: _product_page(name=f"Hamaka {i}", ean=f"859000000000{i}",
+                                   description="Turistická hamaka.")
+                  for i, u in enumerate(details)})
+    monkeypatch.setattr(pagehunt.transport, "fetch", _fetch_map(pages))
+    _checked, found = pagehunt.hunt_trap(
+        session, trap, ["https://shop.example/kategorie"]
+    )
+    assert found == 3
+    titles = {p.title for p in session.scalars(select(Product))}
+    assert "Hamaky" not in titles              # souhrn kategorie se neukládá

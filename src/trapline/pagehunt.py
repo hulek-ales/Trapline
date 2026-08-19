@@ -51,6 +51,9 @@ BLACKLIST = frozenset({
 MAX_PAGES = 30
 MAX_PER_DOMAIN = 5
 MAX_ITEMLIST_URLS = 10
+#: Od kolika položek ItemList je stránka kategorie (její vlastní Product
+#: markup je jen obecný souhrn — neukládat).
+CATEGORY_MIN_ITEMS = 3
 
 #: Cache robots.txt per doména na dobu života procesu.
 _robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
@@ -174,6 +177,11 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
             continue
 
         product = jsonld.best(page.text)
+        lists = jsonld.item_urls(page.text)
+        # Stránka kategorie často nese i obecný Product („Hamaky — od 120 Kč")
+        # — s větším ItemList ji ber jako mapu na detaily, ne jako produkt.
+        if len(lists) >= CATEGORY_MIN_ITEMS:
+            product = None
         if product is not None and product.price and product.name:
             if product.currency and product.currency.upper() not in ("CZK", "KČ"):
                 continue
@@ -190,7 +198,7 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
             continue
 
         # Bez Productu: zkus stránku rozbalit jako kategorii (ItemList).
-        for extra in jsonld.item_urls(page.text)[:MAX_ITEMLIST_URLS]:
+        for extra in lists[:MAX_ITEMLIST_URLS]:
             if (
                 transport.domain_of(extra) == dom
                 and extra not in seen
