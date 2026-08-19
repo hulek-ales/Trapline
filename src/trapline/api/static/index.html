@@ -215,6 +215,14 @@
       <button class="link" id="btn-catalog">celý katalog</button>
       <span class="msg" id="discovery-msg"></span>
     </div>
+    <div id="crawled" hidden>
+      <div class="row"><h2 style="font-size:1rem">Obchody z crawleru</h2><span class="meta" id="crawled-count"></span></div>
+      <p class="subject">Bez feedu — produkty se hlídají po jednotlivých stránkách (JSON-LD), nové přibývají lovem pastí.</p>
+      <table>
+        <thead><tr><th>Obchod</th><th>Hlídané produkty</th><th>Poslední obnova cen</th></tr></thead>
+        <tbody id="crawled-body"></tbody>
+      </table>
+    </div>
     <form class="actions" id="source-form">
       <input type="text" id="src-name" placeholder="Název (např. Bestberg)" required>
       <input type="text" id="src-url" placeholder="https://…/heureka/export/products.xml" required style="min-width:20rem">
@@ -724,9 +732,23 @@ async function loadCatalog() {
   }).join("");
 }
 
+async function loadCrawled() {
+  let rows;
+  try { rows = await ok(await fetch("/api/discovery/crawled-shops")); } catch { return; }
+  $("crawled").hidden = rows.length === 0;
+  $("crawled-count").textContent = rows.length || "";
+  $("crawled-body").innerHTML = rows.map((s) => `
+    <tr>
+      <td>${esc(s.shop)}</td>
+      <td class="num">${s.products}</td>
+      <td style="font-size:.8rem;opacity:.65">${s.last_checked ? new Date(/[Z+]/.test(s.last_checked) ? s.last_checked : s.last_checked + "Z").toLocaleString("cs") : "—"}</td>
+    </tr>`).join("");
+}
+
 async function loadSources() {
   let rows;
   try { rows = await api.sources(); } catch { return; }
+  loadCrawled();
   $("sources").hidden = false;
   $("sources-count").textContent = rows.length || "";
   $("sources-empty").hidden = rows.length > 0;

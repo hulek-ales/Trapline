@@ -271,3 +271,39 @@ def test_casovy_strop_behu(session, monkeypatch):
     assert pagehunt.hunt_trap(
         session, trap, ["https://a.example/x", "https://b.example/y"]
     ) == (0, 0)
+
+
+def test_crawled_shops_endpoint(session, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from trapline.api.main import app
+    from trapline.config import settings as cfg
+
+    monkeypatch.setattr(cfg, "app_password", "")
+    trap = _trap(session)
+    pages = {
+        "https://www.alza.cz/led-a-d1.htm": _product_page(name="Lednička A 30 l"),
+        "https://www.alza.cz/led-b-d2.htm": _product_page(
+            name="Lednička B 40 l", ean="8591112223399"),
+        "https://eshop.example/produkt/led-c": _product_page(
+            name="Lednička C 50 l", ean="8591112223377"),
+    }
+    monkeypatch.setattr(pagehunt.transport, "fetch", _fetch_map(pages))
+    pagehunt.hunt_trap(session, trap, list(pages))
+    session.commit()
+
+    client = TestClient(app)
+    rows = client.get("/api/discovery/crawled-shops").json()
+    assert {r["shop"]: r["products"] for r in rows} == {
+        "alza.cz": 2, "eshop.example": 1,
+    }
+    assert rows[0]["shop"] == "alza.cz"        # řazení podle počtu
+
+
+def test_detail_pattern_odkarla():
+    html = ('<a href="/powerlix-napenovac~p984421">x</a>'
+            '<a href="/kontakt~t123">ne</a>')
+    base = "https://www.odkarla.cz/"
+    assert pagehunt.detail_links(html, base) == [
+        "https://www.odkarla.cz/powerlix-napenovac~p984421"
+    ]
