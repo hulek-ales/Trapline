@@ -107,7 +107,7 @@ def test_pripnuti_blokovana_stranka(client, monkeypatch):
     pid = _product()
     r = client.put(f"/api/products/{pid}/watch",
                    json={"url": "https://www.alza.cz/x.htm"})
-    assert r.status_code == 502
+    assert r.status_code == 424
     assert "browser vypnutý" in r.json()["detail"]
 
 

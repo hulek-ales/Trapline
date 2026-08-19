@@ -107,7 +107,9 @@ def attach_watch(product_id: int, payload: WatchIn, session: DbSession):
     try:
         result = jsonld_watch.attach(session, product, url)
     except transport.TransportError as exc:
-        raise HTTPException(502, f"Stránku nejde stáhnout: {exc}") from None
+        # 424, ne 502 — Cloudflare před appkou tělo 502 odpovědí nahrazuje
+        # vlastní stránkou a detail chyby by se do GUI nikdy nedostal.
+        raise HTTPException(424, f"Stránku nejde stáhnout: {exc}") from None
     except jsonld_watch.ExtractError as exc:
         raise HTTPException(422, str(exc)) from None
     session.commit()
