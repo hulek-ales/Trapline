@@ -41,6 +41,10 @@ BLACKLIST = frozenset({
     "wikipedia.org", "seznam.cz", "google.com", "idnes.cz", "novinky.cz",
     "root.cz", "reddit.com", "aliexpress.com", "temu.com", "amazon.de",
     "amazon.com", "ebay.com", "ebay.de",
+    # ponaučení z prvního ostrého běhu: archiv nese kopie stránek obchodů
+    # s JSON-LD (falešné produkty s mrtvou cenou), github jen challenge
+    "archive.org", "github.com", "gitlab.com", "stackoverflow.com",
+    "medium.com",
 })
 
 #: Stropy jednoho běhu — osobní nasazení, ne plošný scraping.
