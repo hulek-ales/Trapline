@@ -300,3 +300,38 @@ def test_system_log_endpoint(client):
     logging.getLogger("trapline.test").info("testovací zpráva 42")
     body = client.get("/api/system/log?contains=42").json()
     assert any("testovací zpráva 42" in r["msg"] for r in body["items"])
+
+
+def test_products_filtr_podle_pasti(client, monkeypatch):
+    """Stránka pasti musí vidět své oskórované produkty, i když katalog
+    mezitím naroste o stovky novějších položek."""
+    from trapline.models import Criteria, CriteriaMatch
+
+    with Session(db._engine) as s:
+        src = _src(s)
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
+        discovery.run_source(s, src)
+        scored = s.scalars(select(Product)).first()
+        trap = Criteria(name="Lednička", query_terms=["x"])
+        s.add(trap)
+        s.flush()
+        s.add(CriteriaMatch(
+            criteria_id=trap.id, product_id=scored.id, score=80.0, relevant=True,
+        ))
+        # záplava novějších produktů bez skóre — vytlačí scored z okna limitu
+        for i in range(5):
+            s.add(Product(
+                brand="Y", model=f"hamaka {i}", model_norm=f"hamaka {i}",
+                title=f"Hamaka {i}",
+            ))
+        s.commit()
+        trap_id, scored_id = trap.id, scored.id
+
+    vsechny = client.get("/api/discovery/products?limit=3").json()
+    assert all(not r["matches"] for r in vsechny)  # okno = jen nové bez skóre
+
+    moje = client.get(
+        f"/api/discovery/products?limit=3&criteria_id={trap_id}"
+    ).json()
+    assert [r["id"] for r in moje] == [scored_id]
+    assert moje[0]["matches"][0]["criteria_id"] == trap_id
