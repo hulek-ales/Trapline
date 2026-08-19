@@ -57,6 +57,9 @@ class Settings:
         #: Interval obchůzky v hodinách (discovery → skóring → reference →
         #: alerty). 0 = plánovač vypnutý, zůstávají ruční tlačítka.
         self.watch_hours: float = float(_env("WATCH_HOURS", "12"))
+        #: Jak často smí obchůzka hledat nové zdroje pro jednu past (hodiny).
+        #: 0 = automatický hunt vypnutý, zůstává ruční tlačítko u pasti.
+        self.hunt_hours: float = float(_env("HUNT_HOURS", "24"))
 
         # --- Crawler etiketa ---------------------------------------------
         self.user_agent: str = _env(

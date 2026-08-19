@@ -16,7 +16,16 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 
-from . import alerts, db, discovery, jsonld_watch, references, scoring, zbozi_watch
+from . import (
+    alerts,
+    db,
+    discovery,
+    feedhunt,
+    jsonld_watch,
+    references,
+    scoring,
+    zbozi_watch,
+)
 from .config import settings
 
 log = logging.getLogger("trapline.watcher")
@@ -39,6 +48,18 @@ def _wait(status_fn, name: str) -> bool:
 
 def run_cycle() -> None:
     log.info("obchůzka: start")
+    # Hunt před discovery — nově auto-zapnuté feedy se stáhnou hned v tomto
+    # cyklu. Throttle per past (HUNT_HOURS) drží zátěž SearXNG na uzdě.
+    try:
+        found, enabled = feedhunt.run_pending()
+        if found:
+            log.info(
+                "obchůzka: hunt našel %d zdrojů (%d auto-zapnutých)",
+                found, enabled,
+            )
+    except Exception:  # noqa: BLE001 — výpadek SearXNG nesmí zastavit cyklus
+        log.exception("obchůzka: automatický hunt selhal")
+
     if discovery.start():
         if not _wait(discovery.status, "discovery"):
             return

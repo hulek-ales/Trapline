@@ -77,7 +77,7 @@ def test_derive_queries_fallback(session, monkeypatch):
     assert feedhunt.derive_queries(trap) == ["Camping lednička"]
 
 
-def test_run_zaklada_vypnute_navrhy(session, monkeypatch):
+def test_run_silny_nalez_auto_zapne(session, monkeypatch):
     trap = _trap(session)
     # existující zdroj se přeskočí
     session.add(FeedSource(name="Bestberg", url="https://www.bestberg.cz/heureka/export/products.xml"))
@@ -102,9 +102,87 @@ def test_run_zaklada_vypnute_navrhy(session, monkeypatch):
     ).all()
     assert len(rows) == 1
     src = rows[0]
-    assert src.enabled is False               # návrh, ne aktivní zdroj
+    assert src.enabled is True                # silný nález → rovnou aktivní
     assert src.category_filter == "chladni"   # zdědí předfiltr pasti
+    assert "auto-zapnuto" in src.last_status
     assert "12/200" in src.last_status
+    session.refresh(trap)
+    assert trap.last_hunt is not None         # razítko pro throttle obchůzky
+
+
+def test_run_slaby_nalez_zustava_navrhem(session, monkeypatch):
+    trap = _trap(session)
+    monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
+    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["okraj.cz"])
+    monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
+    monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (300, 2))
+    monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
+    feedhunt._run(trap.id)
+    src = session.scalars(
+        select(FeedSource).where(FeedSource.name == "okraj.cz")
+    ).one()
+    assert src.enabled is False
+    assert "návrh" in src.last_status
+
+
+def test_run_bez_prefiltru_se_nezapina(session, monkeypatch):
+    trap = _trap(session, prefilter="")
+    monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
+    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["hamakove.cz"])
+    monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
+    monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (400, 400))
+    monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
+    feedhunt._run(trap.id)
+    src = session.scalars(
+        select(FeedSource).where(FeedSource.name == "hamakove.cz")
+    ).one()
+    assert src.enabled is False               # celý sortiment bez filtru ne
+    assert "předfiltr" in src.last_status
+
+
+def test_run_strop_auto_zapnuti(session, monkeypatch):
+    trap = _trap(session)
+    monkeypatch.setattr(feedhunt, "AUTO_ENABLE_MAX_PER_RUN", 1)
+    monkeypatch.setattr(feedhunt, "derive_queries", lambda t: ["x"])
+    monkeypatch.setattr(feedhunt, "search_domains", lambda q: ["a.cz", "b.cz"])
+    monkeypatch.setattr(feedhunt, "probe_domain", lambda d: f"https://{d}/heureka.xml")
+    monkeypatch.setattr(feedhunt, "evaluate_feed", lambda url, t: (100, 50))
+    monkeypatch.setattr(feedhunt.time, "sleep", lambda s: None)
+    feedhunt._run(trap.id)
+    enabled = [
+        s.name for s in session.scalars(select(FeedSource)).all() if s.enabled
+    ]
+    assert enabled == ["a.cz"]                # druhý zůstal návrhem
+
+
+def test_run_pending_throttle(session, monkeypatch):
+    from datetime import UTC, datetime
+
+    fresh = _trap(session)
+    fresh.last_hunt = datetime.now(UTC).replace(tzinfo=None)
+    stale = Criteria(name="Stará", query_terms=["y"], prefilter="p")
+    vypnuta = Criteria(name="Vypnutá", query_terms=["z"], active=False)
+    session.add_all([stale, vypnuta])
+    session.commit()
+
+    hunted = []
+    monkeypatch.setattr(settings, "searxng_url", "http://searx:1")
+    monkeypatch.setattr(settings, "hunt_hours", 24.0)
+    monkeypatch.setattr(
+        feedhunt, "_hunt_trap",
+        lambda s, t: hunted.append(t.name) or (1, 1),
+    )
+    assert feedhunt.run_pending() == (1, 1)
+    assert hunted == ["Stará"]                # čerstvá i vypnutá se přeskočí
+
+    monkeypatch.setattr(settings, "hunt_hours", 0.0)
+    assert feedhunt.run_pending() == (0, 0)   # vypnutý auto-hunt
+
+
+def test_migrace_obsahuje_last_hunt():
+    assert any(
+        t == "criteria" and c == "last_hunt" for t, c, _ in db._MIGRATIONS
+    )
 
 
 def test_run_preskoci_feed_bez_shody(session, monkeypatch):

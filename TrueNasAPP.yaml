@@ -41,6 +41,9 @@ services:
       # HTTP fetch. Prázdné = jen přímý fetch. Token = TOKEN z browser appky.
       TRAPLINE_BROWSER_URL: ${BROWSER_URL:-}
       TRAPLINE_BROWSER_TOKEN: ${BROWSER_TOKEN:-}
+      # Jak často smí obchůzka automaticky hledat nové zdroje pro jednu past
+      # (hodiny). 0 = vypnuto, zůstává ruční tlačítko u pasti.
+      TRAPLINE_HUNT_HOURS: ${HUNT_HOURS:-24}
       TRAPLINE_HOME_LAT: ${HOME_LAT:-50.5606}
       TRAPLINE_HOME_LON: ${HOME_LON:-15.9127}
       TRAPLINE_USER_AGENT: ${USER_AGENT:-Trapline/0.1 (+osobni cenovy monitor)}
