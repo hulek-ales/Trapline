@@ -34,7 +34,7 @@ log = logging.getLogger("trapline.pagehunt")
 #: média. Na rozdíl od feedového blacklistu tu velcí prodejci CHYBÍ záměrně
 #: — jejich stránky crawler přes browser zvládá a jsou hlavní cíl.
 BLACKLIST = frozenset({
-    "heureka.cz", "zbozi.cz", "glami.cz", "favi.cz", "biano.cz",
+    "heureka.cz", "heureka.sk", "zbozi.cz", "glami.cz", "favi.cz", "biano.cz",
     "srovnanicen.cz", "arukereso.hu", "idealo.de", "pricemania.sk",
     "aukro.cz", "bazos.cz", "sbazar.cz", "allegro.cz", "allegro.pl",
     "facebook.com", "instagram.com", "youtube.com", "pinterest.com",
@@ -186,6 +186,18 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
             if product.currency and product.currency.upper() not in ("CZK", "KČ"):
                 continue
             if not passes_prefilter(trap, product):
+                continue
+            if not (product.brand or product.ean or product.sku):
+                # Souhrnný Product kategorie („Kompresorové chladničky —
+                # od 4229 Kč") nenese značku ani EAN/SKU — skutečný detail
+                # prakticky vždy aspoň jedno má.
+                for extra in lists[:MAX_ITEMLIST_URLS]:
+                    if (
+                        transport.domain_of(extra) == dom
+                        and extra not in seen and extra not in known
+                    ):
+                        seen.add(extra)
+                        queue.append(extra)
                 continue
             row = discovery._upsert_product(session, _to_item(product, url))
             _upsert_offer(session, row.id, product, url)
