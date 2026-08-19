@@ -190,3 +190,22 @@ def test_kategorie_s_vlastnim_productem_se_neuklada(session, monkeypatch):
     assert found == 3
     titles = {p.title for p in session.scalars(select(Product))}
     assert "Hamaky" not in titles              # souhrn kategorie se neukládá
+
+
+def test_product_bez_znacky_a_ean_se_neuklada(session, monkeypatch):
+    """Souhrnný Product kategorie bez značky/EAN/SKU (4camping
+    „Kompresorové chladničky — od 4229 Kč") se neukládá."""
+    trap = _trap(session, prefilter="chladni")
+    html = ('<html><script type="application/ld+json">'
+            '{"@type": "Product", "name": "Kompresorové chladničky",'
+            ' "offers": {"price": 4229, "priceCurrency": "CZK"}}'
+            "</script></html>")
+    monkeypatch.setattr(
+        pagehunt.transport, "fetch",
+        _fetch_map({"https://www.4camping.cz/c/kompresorove-chladnicky/": html}),
+    )
+    checked, found = pagehunt.hunt_trap(
+        session, trap, ["https://www.4camping.cz/c/kompresorove-chladnicky/"]
+    )
+    assert (checked, found) == (1, 0)
+    assert session.query(Product).count() == 0

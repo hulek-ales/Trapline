@@ -85,6 +85,11 @@ def fetch_http(url: str, timeout: float = 30.0) -> Page:
     )
 
 
+#: Jednou zjištěné „starší browserless bez volitelných polí" si pamatuj —
+#: jinak by každé volání pálilo dva POSTy.
+_browser_wants_minimal = False
+
+
 def _browser_body(url: str, minimal: bool = False) -> dict:
     body = {
         "url": url,
@@ -122,11 +127,15 @@ def fetch_browser(url: str, timeout: float = 60.0) -> Page:
     # Stealth maskuje nejběžnější detekce headless Chromu (navigator.webdriver
     # a spol.) — bez něj velcí prodejci servírují challenge i browseru.
     params["launch"] = json.dumps({"stealth": True})
+    global _browser_wants_minimal
     resp = httpx.post(
-        f"{base}/content", params=params, json=_browser_body(url), timeout=timeout
+        f"{base}/content", params=params,
+        json=_browser_body(url, minimal=_browser_wants_minimal),
+        timeout=timeout,
     )
     if resp.status_code == 400 and "additional properties" in resp.text:
         log.info("transport: browserless nezná volitelná pole, zkouším bez nich")
+        _browser_wants_minimal = True
         resp = httpx.post(
             f"{base}/content", params=params,
             json=_browser_body(url, minimal=True), timeout=timeout,

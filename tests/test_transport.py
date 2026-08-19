@@ -89,6 +89,7 @@ def test_browser_fetch_posila_token_a_stealth(monkeypatch):
 
     monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
     monkeypatch.setattr(settings, "browser_token", "tajny")
+    monkeypatch.setattr(transport, "_browser_wants_minimal", False)
     monkeypatch.setattr(transport.httpx, "post", _post)
     page = transport.fetch_browser("https://eshop.example/p")
     assert page.text == "<html>z browseru</html>"
@@ -114,12 +115,16 @@ def test_browser_fetch_degraduje_na_minimalni_telo(monkeypatch):
         return httpx.Response(200, text="<b>obsah</b>")
 
     monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport, "_browser_wants_minimal", False)
     monkeypatch.setattr(transport.httpx, "post", _post)
     page = transport.fetch_browser("https://eshop.example/p")
     assert page.text == "<b>obsah</b>"
     assert len(calls) == 2
     assert "waitForSelector" not in calls[1]
     assert calls[1]["bestAttempt"] is True
+    # degradace se pamatuje — další volání už jede rovnou minimálně
+    transport.fetch_browser("https://eshop.example/q")
+    assert len(calls) == 3
 
 
 def test_browser_fetch_pozna_challenge(monkeypatch, tmp_path):
