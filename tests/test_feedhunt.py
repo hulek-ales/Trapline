@@ -73,8 +73,30 @@ def test_derive_queries_fallback(session, monkeypatch):
     def boom(*a, **kw):
         raise ValueError("LLM mimo")
     monkeypatch.setattr(feedhunt.llm, "chat_json", boom)
-    trap = _trap(session)
-    assert feedhunt.derive_queries(trap) == ["Camping lednička"]
+    trap = _trap(session)  # prefilter="chladni"
+    assert feedhunt.derive_queries(trap) == ["Camping lednička", "chladni"]
+
+
+def test_derive_queries_pridava_prefiltr(session, monkeypatch):
+    """Slova z předfiltru jdou do frází vždy — obchody prodávají „houpací
+    sítě", i když se past jmenuje Hamaka."""
+    monkeypatch.setattr(
+        feedhunt.llm, "chat_json",
+        lambda *a, **kw: {"dotazy": ["hamaka", "outdoorová hamaka"]},
+    )
+    trap = _trap(session, prefilter="Hamak, houpací síť")
+    queries = feedhunt.derive_queries(trap)
+    assert queries[:2] == ["hamaka", "outdoorová hamaka"]
+    assert "Hamak" in queries
+    assert "houpací síť" in queries
+    # prompt pro LLM nese předfiltr jako nápovědu
+    captured = {}
+    monkeypatch.setattr(
+        feedhunt.llm, "chat_json",
+        lambda sys_, user, schema: captured.update(user=user) or {"dotazy": []},
+    )
+    feedhunt.derive_queries(trap)
+    assert "houpací síť" in captured["user"]
 
 
 def test_run_silny_nalez_auto_zapne(session, monkeypatch):

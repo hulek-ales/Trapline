@@ -85,24 +85,43 @@ def _note(msg: str) -> None:
         _state["log"] = _state["log"][-100:]
 
 
+def _prefilter_terms(trap: Criteria) -> list[str]:
+    """Slova z předfiltru pasti — uživatelem ručně vybrané názvy kategorií
+    („houpací síť", „lednic"…), často lepší hledací fráze než cokoli od LLM."""
+    return [
+        t.strip() for t in (trap.prefilter or "").split(",") if len(t.strip()) >= 3
+    ]
+
+
 def derive_queries(trap: Criteria) -> list[str]:
-    """LLM odvodí hledací fráze pro nalezení eshopů; při selhání fallback
-    na název pasti."""
+    """LLM odvodí hledací fráze pro nalezení eshopů; slova z předfiltru se
+    přidávají vždy (LLM je dostane jako nápovědu, fallback je nese taky).
+
+    Ponaučení z ostrého běhu: past „Hamaka" bez předfiltru v promptu vedla
+    jen na fráze se slovem hamaka, zatímco obchody prodávají „houpací sítě".
+    """
+    queries: list[str] = []
     try:
         out = llm.chat_json(
             "Z požadavků uživatele odvoď 3 až 5 krátkých českých frází pro "
             "vyhledání ESHOPŮ, které daný typ zboží prodávají (názvy kategorií "
-            "zboží, ne vlastnosti). Např. pro přenosnou ledničku: autochladnička, "
-            "kompresorová autochladnička eshop, chladicí box do auta.",
-            f"Past: {trap.name}. Požadavky: {', '.join(trap.query_terms)}",
+            "zboží, ne vlastnosti). Používej i synonyma — zboží se v obchodech "
+            "často jmenuje jinak než v zadání. Např. pro přenosnou ledničku: "
+            "autochladnička, kompresorová autochladnička eshop, chladicí box "
+            "do auta.",
+            f"Past: {trap.name}. Požadavky: {', '.join(trap.query_terms)}."
+            + (f" Názvy kategorií zboží: {trap.prefilter}" if trap.prefilter else ""),
             _QUERY_SCHEMA,
         )
-        queries = [q.strip() for q in out.get("dotazy", []) if q.strip()]
-        if queries:
-            return queries[:5]
+        queries = [q.strip() for q in out.get("dotazy", []) if q.strip()][:5]
     except Exception as exc:  # noqa: BLE001
-        _note(f"LLM fráze selhaly ({exc}) — jedu z názvu pasti")
-    return [trap.name]
+        _note(f"LLM fráze selhaly ({exc}) — jedu z názvu pasti a předfiltru")
+    if not queries:
+        queries = [trap.name]
+    for term in _prefilter_terms(trap):
+        if term.lower() not in {q.lower() for q in queries}:
+            queries.append(term)
+    return queries[:7]
 
 
 def _domain(url: str) -> str:
