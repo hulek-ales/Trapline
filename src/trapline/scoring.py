@@ -114,12 +114,17 @@ def criteria_rev(trap: Criteria) -> str:
 
 
 def passes_prefilter(trap: Criteria, product: Product) -> bool:
-    """Levný předfiltr: čárkou oddělené podřetězce proti značce+názvu.
-    Prázdný filtr pouští všechno (dosavadní chování)."""
+    """Levný předfiltr: čárkou oddělené podřetězce proti značce+názvu+popisu.
+
+    Popis je nutný kvůli anglicky pojmenovaným produktům („DoubleNest",
+    „SuperSub Ultralight Hammock" z hudy.cz) — česká kategorie je až v
+    popisu; crawler je podle něj pustil dovnitř a skóring je bez něj zase
+    vyřazoval. Prázdný filtr pouští všechno (dosavadní chování)."""
     terms = [normalize(t) for t in (trap.prefilter or "").split(",") if t.strip()]
     if not terms:
         return True
-    haystack = normalize(f"{product.brand} {product.title}")
+    popis = (product.specs or {}).get("_popis", "")
+    haystack = normalize(f"{product.brand} {product.title} {popis}")
     return any(t in haystack for t in terms)
 
 
