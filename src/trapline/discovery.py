@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import gzip
 import logging
+import re
 import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import db
@@ -54,6 +55,24 @@ def _brand_model_norm(item: FeedItem) -> tuple[str, str]:
     return brand, norm[:160]
 
 
+#: Číslo s jednotkou („750ml", „12v", „30 l" po normalizaci…) — vlastnost,
+#: ne kód modelu. Slučovat podle nich by spojilo hrnec a hrnek 750 ml.
+_UNIT_TOKEN = re.compile(
+    r"^\d+(l|ml|cl|dl|kg|g|mg|cm|mm|m|km|w|kw|v|mah|ah|hz|db|lm|ks|os|kc)?$"
+)
+
+
+def model_codes(name: str) -> frozenset[str]:
+    """Rozlišovací kódy modelu z názvu: tokeny s číslicí (95x, 30a, b40t…),
+    bez čísel s jednotkou. Prázdná množina = žádný spolehlivý kód.
+    """
+    tokens = heureka_feed.normalize(name).split()
+    return frozenset(
+        t for t in tokens
+        if any(c.isdigit() for c in t) and not _UNIT_TOKEN.match(t)
+    )
+
+
 def _upsert_product(session: Session, item: FeedItem) -> Product:
     product = None
     if item.ean:
@@ -67,6 +86,18 @@ def _upsert_product(session: Session, item: FeedItem) -> Product:
                 Product.brand == brand, Product.model_norm == model_norm
             )
         ).first()
+    if product is None and item.manufacturer:
+        # Napříč obchody se stejný model jmenuje pokaždé jinak — celé názvy
+        # nematchnou. Značka + shodná sada kódů modelu (BBPF-30A…) ale ano.
+        codes = model_codes(item.name)
+        if codes:
+            candidates = session.scalars(
+                select(Product).where(func.lower(Product.brand) == brand.lower())
+            )
+            for cand in candidates:
+                if model_codes(cand.title) == codes:
+                    product = cand
+                    break
     if product is None:
         specs = dict(item.params)
         if item.description:
