@@ -165,6 +165,40 @@ def parse(html: str) -> list[JsonLdProduct]:
     return out
 
 
+def item_urls(html: str) -> list[str]:
+    """URL produktů z JSON-LD ItemList (kategorie/výpisy obchodů).
+
+    Kategorie s ItemList je pro crawler mapou na detaily — levnější a
+    spolehlivější než hádat produktové odkazy z HTML.
+    """
+    urls: list[str] = []
+    for doc in _iter_json(html):
+        for node in _walk(doc):
+            types = node.get("@type")
+            if isinstance(types, str):
+                types = [types]
+            if not isinstance(types, list) or not any(
+                isinstance(t, str) and "itemlist" in t.lower() for t in types
+            ):
+                continue
+            elements = node.get("itemListElement")
+            if not isinstance(elements, list):
+                continue
+            for el in elements:
+                if not isinstance(el, dict):
+                    continue
+                url = el.get("url")
+                if not url:
+                    item = el.get("item")
+                    if isinstance(item, dict):
+                        url = item.get("url") or item.get("@id")
+                    elif isinstance(item, str):
+                        url = item
+                if isinstance(url, str) and url.startswith("http") and url not in urls:
+                    urls.append(url)
+    return urls
+
+
 def best(html: str) -> JsonLdProduct | None:
     """Hlavní produkt stránky: první blok s cenou, jinak první vůbec.
 

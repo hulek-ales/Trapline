@@ -51,11 +51,12 @@ def run_cycle() -> None:
     # Hunt před discovery — nově auto-zapnuté feedy se stáhnou hned v tomto
     # cyklu. Throttle per past (HUNT_HOURS) drží zátěž SearXNG na uzdě.
     try:
-        found, enabled = feedhunt.run_pending()
-        if found:
+        found, enabled, products = feedhunt.run_pending()
+        if found or products:
             log.info(
-                "obchůzka: hunt našel %d zdrojů (%d auto-zapnutých)",
-                found, enabled,
+                "obchůzka: hunt našel %d zdrojů (%d auto-zapnutých) "
+                "a %d produktů ze stránek",
+                found, enabled, products,
             )
     except Exception:  # noqa: BLE001 — výpadek SearXNG nesmí zastavit cyklus
         log.exception("obchůzka: automatický hunt selhal")

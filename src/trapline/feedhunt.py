@@ -85,24 +85,43 @@ def _note(msg: str) -> None:
         _state["log"] = _state["log"][-100:]
 
 
+def _prefilter_terms(trap: Criteria) -> list[str]:
+    """Slova z předfiltru pasti — uživatelem ručně vybrané názvy kategorií
+    („houpací síť", „lednic"…), často lepší hledací fráze než cokoli od LLM."""
+    return [
+        t.strip() for t in (trap.prefilter or "").split(",") if len(t.strip()) >= 3
+    ]
+
+
 def derive_queries(trap: Criteria) -> list[str]:
-    """LLM odvodí hledací fráze pro nalezení eshopů; při selhání fallback
-    na název pasti."""
+    """LLM odvodí hledací fráze pro nalezení eshopů; slova z předfiltru se
+    přidávají vždy (LLM je dostane jako nápovědu, fallback je nese taky).
+
+    Ponaučení z ostrého běhu: past „Hamaka" bez předfiltru v promptu vedla
+    jen na fráze se slovem hamaka, zatímco obchody prodávají „houpací sítě".
+    """
+    queries: list[str] = []
     try:
         out = llm.chat_json(
             "Z požadavků uživatele odvoď 3 až 5 krátkých českých frází pro "
             "vyhledání ESHOPŮ, které daný typ zboží prodávají (názvy kategorií "
-            "zboží, ne vlastnosti). Např. pro přenosnou ledničku: autochladnička, "
-            "kompresorová autochladnička eshop, chladicí box do auta.",
-            f"Past: {trap.name}. Požadavky: {', '.join(trap.query_terms)}",
+            "zboží, ne vlastnosti). Používej i synonyma — zboží se v obchodech "
+            "často jmenuje jinak než v zadání. Např. pro přenosnou ledničku: "
+            "autochladnička, kompresorová autochladnička eshop, chladicí box "
+            "do auta.",
+            f"Past: {trap.name}. Požadavky: {', '.join(trap.query_terms)}."
+            + (f" Názvy kategorií zboží: {trap.prefilter}" if trap.prefilter else ""),
             _QUERY_SCHEMA,
         )
-        queries = [q.strip() for q in out.get("dotazy", []) if q.strip()]
-        if queries:
-            return queries[:5]
+        queries = [q.strip() for q in out.get("dotazy", []) if q.strip()][:5]
     except Exception as exc:  # noqa: BLE001
-        _note(f"LLM fráze selhaly ({exc}) — jedu z názvu pasti")
-    return [trap.name]
+        _note(f"LLM fráze selhaly ({exc}) — jedu z názvu pasti a předfiltru")
+    if not queries:
+        queries = [trap.name]
+    for term in _prefilter_terms(trap):
+        if term.lower() not in {q.lower() for q in queries}:
+            queries.append(term)
+    return queries[:7]
 
 
 def _domain(url: str) -> str:
@@ -126,7 +145,7 @@ def extract_domains_from_html(html: str) -> list[str]:
 
 
 def _search_one(client: httpx.Client, query: str) -> list[str]:
-    """Jeden dotaz na SearXNG → domény. Preferuje JSON API; když je
+    """Jeden dotaz na SearXNG → URL výsledků. Preferuje JSON API; když je
     zamčené (403 — defaultně vypnuté formats: json), sjede HTML výstup,
     který funguje vždy."""
     base = f"{settings.searxng_url.rstrip('/')}/search"
@@ -135,8 +154,9 @@ def _search_one(client: httpx.Client, query: str) -> list[str]:
         resp = client.get(base, params={**params, "format": "json"})
         resp.raise_for_status()
         return [
-            _domain(item.get("url", ""))
+            item.get("url", "")
             for item in resp.json().get("results", [])
+            if item.get("url")
         ]
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 403:
@@ -144,26 +164,42 @@ def _search_one(client: httpx.Client, query: str) -> list[str]:
     # JSON API zamčené → HTML fallback
     resp = client.get(base, params=params)
     resp.raise_for_status()
-    return extract_domains_from_html(resp.text)
+    seen: list[str] = []
+    for url in _HTML_LINK.findall(resp.text):
+        if url not in seen:
+            seen.append(url)
+    return seen
 
 
-def search_domains(queries: list[str]) -> list[str]:
-    """SearXNG → kandidátní domény, seřazené podle četnosti ve výsledcích."""
-    counts: dict[str, int] = {}
+def search_urls(queries: list[str]) -> list[str]:
+    """SearXNG → URL výsledků napříč dotazy, unikátní v pořadí výskytu.
+    Bez filtrování — blacklist si aplikuje volající (feedy a crawler mají
+    jiný: feedy např. Alzu vynechávají, crawler ji přes browser zvládá)."""
+    out: list[str] = []
     with httpx.Client(
         timeout=20, headers={"User-Agent": settings.user_agent}
     ) as client:
         for query in queries:
             try:
-                domains = _search_one(client, query)
+                urls = _search_one(client, query)
             except Exception as exc:  # noqa: BLE001
                 _note(f"hledání „{query}“ selhalo: {exc}")
                 continue
-            for dom in domains:
-                if not dom or any(dom.endswith(b) for b in DOMAIN_BLACKLIST):
-                    continue
-                counts[dom] = counts.get(dom, 0) + 1
+            for url in urls:
+                if url not in out:
+                    out.append(url)
             time.sleep(1.0)
+    return out
+
+
+def search_domains(queries: list[str]) -> list[str]:
+    """SearXNG → kandidátní domény, seřazené podle četnosti ve výsledcích."""
+    counts: dict[str, int] = {}
+    for url in search_urls(queries):
+        dom = _domain(url)
+        if not dom or any(dom.endswith(b) for b in DOMAIN_BLACKLIST):
+            continue
+        counts[dom] = counts.get(dom, 0) + 1
     return sorted(counts, key=counts.get, reverse=True)
 
 
@@ -206,17 +242,26 @@ def evaluate_feed(url: str, trap: Criteria) -> tuple[int, int]:
     return len(items), matching
 
 
-def _hunt_trap(session, trap: Criteria) -> tuple[int, int]:
-    """Jeden lov pro jednu past. Vrací (nových zdrojů, z toho auto-zapnutých).
-
-    Commituje průběžně po každém nálezu a na konci razítkuje
-    ``trap.last_hunt`` — throttle pro obchůzku.
+def _hunt_trap(session, trap: Criteria) -> tuple[int, int, int]:
+    """Jeden lov pro jednu past: feedy + crawler stránek nad týmiž výsledky
+    hledání. Vrací (nových zdrojů, z toho auto-zapnutých, produktů ze
+    stránek). Commituje průběžně a na konci razítkuje ``trap.last_hunt``.
     """
+    from . import pagehunt  # lazy — pagehunt importuje zpátky _note
+
     known = {_domain(s.url) for s in session.scalars(select(FeedSource))}
     _note(f"past „{trap.name}“: odvozuji hledací fráze")
     queries = derive_queries(trap)
     _note("fráze: " + ", ".join(queries))
-    domains = [d for d in search_domains(queries) if d not in known]
+    urls = search_urls(queries)
+    counts: dict[str, int] = {}
+    for url in urls:
+        dom = _domain(url)
+        if dom and not any(dom.endswith(b) for b in DOMAIN_BLACKLIST):
+            counts[dom] = counts.get(dom, 0) + 1
+    domains = [
+        d for d in sorted(counts, key=counts.get, reverse=True) if d not in known
+    ]
     domains = domains[:MAX_CANDIDATES]
     _note(f"kandidátů k oťukání: {len(domains)}")
 
@@ -269,19 +314,29 @@ def _hunt_trap(session, trap: Criteria) -> tuple[int, int]:
             f"{domain}: NALEZEN feed, {matching}/{total} položek odpovídá"
             + (" → auto-zapnut" if auto else "")
         )
+    # Fáze 2: crawler produktových stránek (JSON-LD) nad týmiž výsledky —
+    # pokrývá obchody bez feedu včetně velkých řetězců (přes browser).
+    try:
+        _pages, products = pagehunt.hunt_trap(session, trap, urls)
+    except Exception as exc:  # noqa: BLE001 — crawler nesmí shodit lov feedů
+        log.exception("pagehunt pro past %s selhal", trap.name)
+        _note(f"crawler stránek selhal: {exc}")
+        products = 0
+
     # Naivní UTC jako zbytek schématu (server_default func.now()) — ať jde
     # sloupec porovnávat s cutoffem bez tanců kolem timezone.
     trap.last_hunt = datetime.now(UTC).replace(tzinfo=None)
     session.commit()
     _note(
-        f"past „{trap.name}“ hotová: {found} nových zdrojů, "
-        f"{enabled} auto-zapnutých"
+        f"past „{trap.name}“ hotová: {found} nových zdrojů "
+        f"({enabled} auto-zapnutých), {products} produktů ze stránek"
         + (" — návrhy povol v sekci Zdroje" if found > enabled else "")
     )
-    return found, enabled
+    return found, enabled, products
 
 
 def _run(criteria_id: int) -> None:
+    found = enabled = products = 0
     try:
         if not db.ensure_ready():
             _note("databáze není dostupná — běh se ruší")
@@ -291,34 +346,45 @@ def _run(criteria_id: int) -> None:
             if trap is None:
                 _note("past neexistuje")
                 return
-            _hunt_trap(session, trap)
+            found, enabled, products = _hunt_trap(session, trap)
     finally:
         with _lock:
             _state["running"] = False
             _state["finished"] = datetime.now(UTC).isoformat()
+    # Ruční lov naváže rovnou: nové feedy stáhne discovery, produkty ze
+    # stránek pošle na skóring — jinak by na vyhodnocení čekaly do obchůzky.
+    from . import discovery, scoring
+
+    if enabled:
+        discovery.start()
+        _note("spouštím discovery pro auto-zapnuté zdroje")
+    elif products:
+        scoring.start()
+        _note("spouštím skóring nových produktů")
 
 
-def run_pending() -> tuple[int, int]:
+def run_pending() -> tuple[int, int, int]:
     """Obchůzka: lov pro každou aktivní past, jejíž poslední hunt je starší
     než HUNT_HOURS. Běží synchronně (volá se z vlákna obchůzky) a vrací
-    (nových zdrojů, auto-zapnutých). Nově zapnuté feedy stáhne discovery
-    hned v témže cyklu."""
+    (nových zdrojů, auto-zapnutých, produktů ze stránek). Nově zapnuté
+    feedy stáhne discovery hned v témže cyklu; produkty ze stránek oskóruje
+    skóring, který v cyklu následuje."""
     if settings.hunt_hours <= 0 or not settings.searxng_url:
-        return 0, 0
+        return 0, 0, 0
     with _lock:
         if _state["running"]:
-            return 0, 0
+            return 0, 0, 0
         _state.update(
             running=True,
             started=datetime.now(UTC).isoformat(),
             finished=None,
             log=[],
         )
-    found = enabled = 0
+    found = enabled = products = 0
     try:
         if not db.ensure_ready():
             _note("databáze není dostupná — běh se ruší")
-            return 0, 0
+            return 0, 0, 0
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
             hours=settings.hunt_hours
         )
@@ -332,17 +398,18 @@ def run_pending() -> tuple[int, int]:
             ]
             if not due:
                 _note("žádná past nemá hunt na řadě")
-                return 0, 0
+                return 0, 0, 0
             _note(f"automatický hunt: {len(due)} pastí na řadě")
             for trap in due:
-                f, e = _hunt_trap(session, trap)
+                f, e, p = _hunt_trap(session, trap)
                 found += f
                 enabled += e
+                products += p
     finally:
         with _lock:
             _state["running"] = False
             _state["finished"] = datetime.now(UTC).isoformat()
-    return found, enabled
+    return found, enabled, products
 
 
 def start(criteria_id: int) -> bool:
