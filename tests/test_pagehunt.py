@@ -259,3 +259,15 @@ def test_alza_kategorie_pres_html_odkazy(session, monkeypatch):
     assert checked == 5                        # 2 kategorie + 3 detaily
     shops = {o.shop for o in session.scalars(select(Offer))}
     assert shops == {"alza.cz"}
+
+
+def test_casovy_strop_behu(session, monkeypatch):
+    trap = _trap(session)
+    monkeypatch.setattr(pagehunt, "MAX_RUN_S", -1)
+    monkeypatch.setattr(
+        pagehunt.transport, "fetch",
+        lambda url, prefer_browser=False: pytest.fail("po stropu se nestahuje"),
+    )
+    assert pagehunt.hunt_trap(
+        session, trap, ["https://a.example/x", "https://b.example/y"]
+    ) == (0, 0)

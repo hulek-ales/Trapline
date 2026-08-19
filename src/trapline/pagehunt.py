@@ -52,13 +52,18 @@ BLACKLIST = frozenset({
     "medium.com",
 })
 
-#: Stropy jednoho běhu — osobní nasazení, ne plošný scraping. Vyšší limit
-#: na doménu má smysl od chvíle, kdy umíme rozbalit kategorii velkého
-#: řetězce na detaily (Alza kategorie = desítky produktů).
-MAX_PAGES = 40
-MAX_PER_DOMAIN = 12
-MAX_ITEMLIST_URLS = 10
-MAX_DETAIL_LINKS = 20
+#: Stropy jednoho běhu — osobní nasazení, ne plošný scraping. S rozbalováním
+#: kategorií je limitem hlavně čas: kategorie velkého řetězce (Alza: 163
+#: položek na 7 stranách) se má spolknout na jeden až dva běhy, ne za týden
+#: — nabídka se mezitím mění. 2,5s rozestupy zůstávají, takže i plný běh
+#: je pro eshop zanedbatelný provoz; tvrdou brzdou je MAX_RUN_S.
+MAX_PAGES = 150
+MAX_PER_DOMAIN = 60
+MAX_ITEMLIST_URLS = 30
+MAX_DETAIL_LINKS = 40
+#: Časový strop jednoho běhu (na past) — browser fetche jsou pomalé a fronta
+#: se může rozrůst; zbytek doběhne příští den díky dedupu známých URL.
+MAX_RUN_S = 20 * 60
 #: Od kolika položek ItemList je stránka kategorie (její vlastní Product
 #: markup je jen obecný souhrn — neukládat).
 CATEGORY_MIN_ITEMS = 3
@@ -215,8 +220,15 @@ def hunt_trap(session: Session, trap: Criteria, urls: list[str]) -> tuple[int, i
                 seen.add(extra)
                 queue.append(extra)
 
+    started = time.monotonic()
     i = 0
     while i < len(queue) and pages < MAX_PAGES:
+        if time.monotonic() - started > MAX_RUN_S:
+            feedhunt._note(
+                f"crawler: časový strop {MAX_RUN_S // 60} min, "
+                f"{len(queue) - i} URL nechávám na příště"
+            )
+            break
         url = queue[i]
         i += 1
         dom = transport.domain_of(url)
