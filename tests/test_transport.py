@@ -99,6 +99,29 @@ def test_browser_fetch_posila_token_a_stealth(monkeypatch):
     assert captured["json"]["blockConsentModals"] is True
 
 
+def test_browser_fetch_degraduje_na_minimalni_telo(monkeypatch):
+    # Starší browserless odmítne neznámá volitelná pole celou validací těla
+    # — druhý pokus jede bez nich.
+    calls = []
+
+    def _post(url, params=None, json=None, timeout=None):
+        calls.append(json)
+        if "blockConsentModals" in json:
+            return httpx.Response(
+                400, text="POST Body validation failed: "
+                          "must NOT have additional properties"
+            )
+        return httpx.Response(200, text="<b>obsah</b>")
+
+    monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(transport.httpx, "post", _post)
+    page = transport.fetch_browser("https://eshop.example/p")
+    assert page.text == "<b>obsah</b>"
+    assert len(calls) == 2
+    assert "waitForSelector" not in calls[1]
+    assert calls[1]["bestAttempt"] is True
+
+
 def test_browser_fetch_pozna_challenge(monkeypatch, tmp_path):
     def _post(url, params=None, json=None, timeout=None):
         return httpx.Response(200, text="<title>Just a moment...</title>")
