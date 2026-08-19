@@ -209,3 +209,53 @@ def test_product_bez_znacky_a_ean_se_neuklada(session, monkeypatch):
     )
     assert (checked, found) == (1, 0)
     assert session.query(Product).count() == 0
+
+
+def test_detail_links_a_next_page():
+    html = '''<html><head>
+      <link href="/sport/levne-houpaci-site/18856259-p2.htm" rel="next">
+      </head><body>
+      <a href="/sport/houpaci-sit-canvas-d7712711.htm">Canvas</a>
+      <a href="https://www.alza.cz/sport/acra-houpaci-sit-d5544332.htm?o=1">Acra</a>
+      <a href="https://www.alza.cz/sport/houpaci-sit-canvas-d7712711.htm">dup</a>
+      <a href="https://jinyweb.cz/produkt/cizi-d123.htm">cizí doména</a>
+      <a href="/kosik">košík</a>
+      </body></html>'''
+    base = "https://www.alza.cz/sport/levne-houpaci-site/18856259.htm"
+    links = pagehunt.detail_links(html, base)
+    assert links == [
+        "https://www.alza.cz/sport/houpaci-sit-canvas-d7712711.htm",
+        "https://www.alza.cz/sport/acra-houpaci-sit-d5544332.htm?o=1",
+    ]
+    assert pagehunt.next_page(html, base) == (
+        "https://www.alza.cz/sport/levne-houpaci-site/18856259-p2.htm"
+    )
+    assert pagehunt.next_page("<html>bez next</html>", base) is None
+
+
+def test_alza_kategorie_pres_html_odkazy(session, monkeypatch):
+    """Kategorie bez JSON-LD ItemList (Alza) → detaily z HTML odkazů,
+    pokračování přes rel=next."""
+    trap = _trap(session, prefilter="houpací síť, hamak")
+    cat1 = "https://www.alza.cz/sport/levne-houpaci-site/18856259.htm"
+    cat2 = "https://www.alza.cz/sport/levne-houpaci-site/18856259-p2.htm"
+    d1 = "https://www.alza.cz/sport/sit-canvas-d1.htm"
+    d2 = "https://www.alza.cz/sport/sit-acra-d2.htm"
+    d3 = "https://www.alza.cz/sport/sit-sedco-d3.htm"
+    pages = {
+        cat1: (f'<html><head><link rel="next" href="{cat2}"></head>'
+               f'<a href="{d1}">x</a><a href="{d2}">y</a></html>'),
+        cat2: f'<html><a href="{d3}">z</a></html>',
+        d1: _product_page(name="Houpací síť Canvas 200x80", brand="Canvas",
+                          ean="8590000000011", description="Houpací síť."),
+        d2: _product_page(name="Acra houpací síť J02", brand="Acra",
+                          ean="8590000000012", description="Houpací síť."),
+        d3: _product_page(name="Sedco houpací síť 200x80", brand="Sedco",
+                          ean="8590000000013", description="Houpací síť."),
+    }
+    monkeypatch.setattr(pagehunt.transport, "fetch", _fetch_map(pages))
+    checked, found = pagehunt.hunt_trap(session, trap, [cat1])
+    assert found == 3
+    assert checked == 5                        # 2 kategorie + 3 detaily
+    shops = {o.shop for o in session.scalars(select(Offer))}
+    assert shops == {"alza.cz"}
