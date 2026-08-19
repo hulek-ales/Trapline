@@ -173,12 +173,25 @@ class ProductOut(BaseModel):
 
 
 @router.get("/products", response_model=list[ProductOut])
-def list_products(session: DbSession, limit: int = 200):
-    """Katalog nalezených produktů s poslední cenou z každé nabídky."""
+def list_products(
+    session: DbSession, limit: int = 200, criteria_id: int | None = None
+):
+    """Katalog nalezených produktů s poslední cenou z každé nabídky.
+
+    ``criteria_id`` vrací produkty oskórované danou pastí — bez toho by je
+    stránka pasti lovila z posledních N položek katalogu a po každém větším
+    discovery (nová past = stovky nových produktů) by „zmizely"."""
     limit = max(1, min(limit, 1000))
-    products = session.scalars(
-        select(Product).order_by(Product.id.desc()).limit(limit)
-    ).all()
+    query = select(Product).order_by(Product.id.desc()).limit(limit)
+    if criteria_id is not None:
+        query = (
+            select(Product)
+            .join(CriteriaMatch, CriteriaMatch.product_id == Product.id)
+            .where(CriteriaMatch.criteria_id == criteria_id)
+            .order_by(Product.id.desc())
+            .limit(limit)
+        )
+    products = session.scalars(query).all()
     trap_names = dict(session.execute(select(Criteria.id, Criteria.name)).all())
     verdicts = {
         fb.product_id: fb.verdict.value

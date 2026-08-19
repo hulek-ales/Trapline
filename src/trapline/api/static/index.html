@@ -76,6 +76,16 @@
   }
   table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
   th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+  /* Mobil: tabulky bývají širší než karta — ať se posouvají uvnitř ní,
+     místo aby řádky přetékaly přes okraj. */
+  @media (max-width: 700px) {
+    body { padding: 1rem .5rem; }
+    section { padding: .9rem .7rem; }
+    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    th, td { padding: .4rem .35rem; }
+    td { min-width: 5.5rem; }
+    td.bd { min-width: 14rem; }
+  }
   th { font-size: .78rem; opacity: .55; font-weight: 600; }
   td.num { font-variant-numeric: tabular-nums; }
   tr.inactive td { opacity: .45; }
@@ -312,7 +322,11 @@ const api = {
                    if (!r.ok && r.status !== 204) throw new Error(r.status); }),
   discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
   discoveryStatus: () => fetch("/api/discovery/status").then(ok),
-  products: () => fetch("/api/discovery/products").then(ok),
+  // S criteria_id vrací server produkty oskórované danou pastí — jinak jen
+  // posledních 200 položek katalogu (a výsledky pasti by po velkém discovery
+  // vypadly z okna).
+  products: (cid) => fetch("/api/discovery/products"
+    + (cid ? `?criteria_id=${cid}&limit=1000` : "")).then(ok),
   scoringRun:    () => fetch("/api/scoring/run", { method: "POST" }).then(ok),
   scoringStatus: () => fetch("/api/scoring/status").then(ok),
   ollama:        () => fetch("/api/scoring/ollama").then(ok),
@@ -411,7 +425,7 @@ function verdiktIkona(v) {
 async function renderTrapDetail(id) {
   let traps, products;
   try {
-    [traps, products] = await Promise.all([api.traps(), api.products()]);
+    [traps, products] = await Promise.all([api.traps(), api.products(id)]);
   } catch { return; }
   const trap = traps.find((t) => t.id === id);
   if (!trap) { location.hash = ""; return; }
