@@ -78,7 +78,9 @@ def test_fetch_sitova_chyba_eskaluje(monkeypatch):
     assert transport.fetch("https://alza.example/p").via == "browser"
 
 
-def test_browser_fetch_posila_token(monkeypatch):
+def test_browser_fetch_posila_token_a_stealth(monkeypatch):
+    import json as jsonmod
+
     captured = {}
 
     def _post(url, params=None, json=None, timeout=None):
@@ -91,8 +93,22 @@ def test_browser_fetch_posila_token(monkeypatch):
     page = transport.fetch_browser("https://eshop.example/p")
     assert page.text == "<html>z browseru</html>"
     assert captured["url"] == "http://browser:3000/content"
-    assert captured["params"] == {"token": "tajny"}
+    assert captured["params"]["token"] == "tajny"
+    assert jsonmod.loads(captured["params"]["launch"]) == {"stealth": True}
     assert captured["json"]["url"] == "https://eshop.example/p"
+    assert captured["json"]["blockConsentModals"] is True
+
+
+def test_browser_fetch_pozna_challenge(monkeypatch, tmp_path):
+    def _post(url, params=None, json=None, timeout=None):
+        return httpx.Response(200, text="<title>Just a moment...</title>")
+
+    monkeypatch.setattr(settings, "browser_url", "http://browser:3000")
+    monkeypatch.setattr(settings, "snapshot_dir", str(tmp_path))
+    monkeypatch.setattr(transport.httpx, "post", _post)
+    with pytest.raises(transport.TransportError, match="blokuje i skutečný Chrome"):
+        transport.fetch_browser("https://alza.example/p")
+    assert list((tmp_path / "failures").glob("*-browser.html.gz"))
 
 
 def test_save_failure(tmp_path, monkeypatch):
@@ -185,3 +201,38 @@ def test_jsonld_nevalidni_blok_nepada():
     )
     p = jsonld.best(html)
     assert p is not None and p.name == "OK"
+
+
+# --- inspekce tichých selhání (API) -----------------------------------------
+
+def test_failures_endpointy(monkeypatch, tmp_path):
+    import gzip
+
+    from fastapi.testclient import TestClient
+
+    from trapline.api.main import app
+
+    monkeypatch.setattr(settings, "app_password", "")
+    monkeypatch.setattr(settings, "snapshot_dir", str(tmp_path))
+    client = TestClient(app)
+
+    assert client.get("/api/system/failures").json() == {"items": []}
+
+    folder = tmp_path / "failures"
+    folder.mkdir()
+    (folder / "20260819-070200-alza-cz.html.gz").write_bytes(
+        gzip.compress(b"<html>challenge</html>")
+    )
+    items = client.get("/api/system/failures").json()["items"]
+    assert items[0]["name"] == "20260819-070200-alza-cz.html.gz"
+
+    r = client.get("/api/system/failures/20260819-070200-alza-cz.html.gz")
+    assert r.status_code == 200
+    assert "challenge" in r.text
+
+    assert client.get("/api/system/failures/neexistuje.html.gz").status_code == 404
+    # jméno mimo povolený tvar (traversal apod.) odmítne regex ještě před diskem
+    assert client.get("/api/system/failures/x..y.html.gz.evil").status_code == 404
+    from trapline.api.system import _FAILURE_NAME
+    assert not _FAILURE_NAME.fullmatch("../x.html.gz")
+    assert not _FAILURE_NAME.fullmatch("a/b.html.gz")
