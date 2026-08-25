@@ -54,6 +54,11 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
         "last_hunt",
         "ALTER TABLE criteria ADD COLUMN last_hunt DATETIME NULL",
     ),
+    (
+        "listing_matches",
+        "criteria_id",
+        "ALTER TABLE listing_matches ADD COLUMN criteria_id INT NULL",
+    ),
 ]
 
 

@@ -253,6 +253,9 @@ class ListingMatch(Base):
     product_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id"), index=True
     )
+    #: Past, pro kterou byl inzerát vyhodnocen (v1: inzerát ↔ past přímo;
+    #: párování na konkrétní produkt zůstává volitelné).
+    criteria_id: Mapped[int | None] = mapped_column(ForeignKey("criteria.id"))
 
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     condition: Mapped[Condition] = mapped_column(

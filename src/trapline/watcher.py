@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 
 from . import (
     alerts,
+    bazar,
     db,
     discovery,
     feedhunt,
@@ -87,6 +88,11 @@ def run_cycle() -> None:
         jsonld_watch.refresh_all()
     except Exception:  # noqa: BLE001 — výpadek eshopu nesmí zastavit reference
         log.exception("obchůzka: obnova hlídaných stránek selhala")
+
+    try:
+        bazar.run_all()
+    except Exception:  # noqa: BLE001 — bazary nesmí zastavit reference
+        log.exception("obchůzka: průchod bazarů selhal")
 
     if not db.ensure_ready():
         log.warning("obchůzka: databáze nedostupná, reference a alerty vynechány")
