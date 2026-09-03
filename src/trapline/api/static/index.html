@@ -158,6 +158,14 @@
       <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th><th></th></tr></thead>
       <tbody id="td-body"></tbody>
     </table>
+    <div id="td-bazar" hidden>
+      <div class="row"><h2 style="font-size:1rem">Bazar</h2><span class="meta" id="td-bazar-count"></span></div>
+      <p class="subject">Inzeráty z Bazoše a Sbazaru vyhodnocené proti pasti. Zmizelé jsou přeškrtnuté.</p>
+      <table>
+        <thead><tr><th>Inzerát</th><th>Cena</th><th>Kde</th><th>Stav</th><th>Skóre</th><th>Varování</th></tr></thead>
+        <tbody id="td-bazar-body"></tbody>
+      </table>
+    </div>
   </section>
 
   <section id="traps" hidden>
@@ -371,6 +379,7 @@ const api = {
     return r.json();
   },
   browser: () => fetch("/api/system/browser").then(ok),
+  trapListings: (id) => fetch(`/api/criteria/${id}/listings`).then(ok),
   version: () => fetch("/api/system/version").then(ok),
   check:   () => fetch("/api/system/check",  { method: "POST" }).then(ok),
   update:  () => fetch("/api/system/update", { method: "POST" }).then(ok),
@@ -478,6 +487,31 @@ async function renderTrapDetail(id) {
       </td>
     </tr>`;
   }).join("");
+  loadTrapBazar(id);
+}
+
+const STAV_CZ = { new: "nové", like_new: "jako nové", used: "použité",
+                  damaged: "poškozené", unknown: "?" };
+
+async function loadTrapBazar(id) {
+  let rows;
+  try { rows = await api.trapListings(id); } catch { return; }
+  const onlyRel = $("td-only-rel").checked;
+  if (onlyRel) rows = rows.filter((l) => l.relevant);
+  $("td-bazar").hidden = rows.length === 0;
+  $("td-bazar-count").textContent = rows.length || "";
+  $("td-bazar-body").innerHTML = rows.map((l) => `
+    <tr class="${l.gone ? "inactive" : ""}">
+      <td style="${l.gone ? "text-decoration:line-through" : ""}">
+        ${esc(l.title)} <a href="${esc(l.url)}" target="_blank" rel="noopener">↗</a>
+        <div class="variants">${esc(l.bazar)} · ${l.first_seen ? new Date(l.first_seen + (/[Z+]/.test(l.first_seen) ? "" : "Z")).toLocaleDateString("cs") : ""}</div>
+      </td>
+      <td class="num">${l.price ? `${l.price} Kč` : "dohodou"}</td>
+      <td style="font-size:.82rem">${esc(l.locality || "—")}</td>
+      <td style="font-size:.82rem">${STAV_CZ[l.condition] || l.condition}</td>
+      <td><span class="badge ${l.relevant ? "rel" : ""}">${l.score}${l.relevant ? " ✓" : ""}</span></td>
+      <td class="bd">${(l.red_flags || []).map((f) => `<div>⚠ ${esc(f)}</div>`).join("") || "—"}</td>
+    </tr>`).join("");
 }
 
 function route() {

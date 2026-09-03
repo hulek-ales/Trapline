@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from .. import db, scoring
 from ..config import settings
-from ..models import Criteria, CriteriaMatch, Product
+from ..models import Criteria, CriteriaMatch, Listing, ListingMatch, Product
 
 router = APIRouter(prefix="/api/criteria", tags=["criteria"])
 
@@ -127,13 +127,47 @@ def update_criteria(criteria_id: int, payload: CriteriaPatch, session: DbSession
     return row
 
 
+@router.get("/{criteria_id}/listings")
+def trap_listings(criteria_id: int, session: DbSession):
+    """Bazarové inzeráty vyhodnocené pro past, nejnovější první."""
+    _get_or_404(session, criteria_id)
+    rows = session.execute(
+        select(ListingMatch, Listing)
+        .join(Listing, Listing.id == ListingMatch.listing_id)
+        .where(ListingMatch.criteria_id == criteria_id)
+        .order_by(Listing.first_seen.desc())
+        .limit(100)
+    ).all()
+    return [
+        {
+            "id": listing.id,
+            "title": listing.title,
+            "url": listing.url,
+            "price": listing.price or None,
+            "locality": listing.locality,
+            "bazar": listing.source.value,
+            "score": round(match.confidence * 100),
+            "relevant": match.confidence >= 0.6,
+            "condition": match.condition.value,
+            "red_flags": match.red_flags or [],
+            "first_seen": listing.first_seen.isoformat()
+            if listing.first_seen else None,
+            "gone": listing.gone_at is not None,
+        }
+        for match, listing in rows
+    ]
+
+
 @router.delete("/{criteria_id}", status_code=204)
 def delete_criteria(criteria_id: int, session: DbSession):
     row = _get_or_404(session, criteria_id)
-    # výsledky skóringu drží FK na past — bez tohohle mazání spadne na
-    # MariaDB (SQLite FK v testech nevynucuje, proto fixture zapíná pragma)
+    # výsledky skóringu i bazarové vyhodnocení drží FK na past — bez tohohle
+    # mazání spadne na MariaDB (SQLite FK v testech vynucuje pragma fixture)
     session.execute(
         delete(CriteriaMatch).where(CriteriaMatch.criteria_id == criteria_id)
+    )
+    session.execute(
+        delete(ListingMatch).where(ListingMatch.criteria_id == criteria_id)
     )
     session.delete(row)
     session.commit()
