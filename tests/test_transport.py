@@ -293,3 +293,25 @@ def test_blokovana_domena_jde_priste_rovnou_na_browser(monkeypatch):
         lambda url, timeout=30.0: transport.Page(url, url, 200, "ok", "http"),
     )
     assert transport.fetch("https://jinde.example/x").via == "http"
+
+
+def test_integrations_endpoint(monkeypatch):
+    """Přehled integrací hlásí stav, ale nikdy nevrací klíče ani hesla."""
+    from fastapi.testclient import TestClient
+
+    from trapline.api.main import app
+
+    monkeypatch.setattr(settings, "app_password", "")
+    monkeypatch.setattr(settings, "allegro_client_id", "")
+    monkeypatch.setattr(settings, "allegro_client_secret", "")
+    monkeypatch.setattr(settings, "ntfy_topic", "")
+    d = TestClient(app).get("/api/system/integrations").json()
+    assert d["allegro"]["configured"] is False
+    assert "TRAPLINE_ALLEGRO_CLIENT_ID" in d["allegro"]["hint"]
+    assert d["ntfy"]["configured"] is False
+
+    monkeypatch.setattr(settings, "allegro_client_id", "tajne-id")
+    monkeypatch.setattr(settings, "allegro_client_secret", "tajny-secret")
+    d = TestClient(app).get("/api/system/integrations").json()
+    assert d["allegro"] == {"configured": True, "user_agent": False, "hint": ""}
+    assert "tajne-id" not in str(d) and "tajny-secret" not in str(d)

@@ -35,6 +35,8 @@ services:
       TRAPLINE_LLM_MAIN: ${LLM_MAIN:-qwen3:14b}
       TRAPLINE_ALLEGRO_CLIENT_ID: ${ALLEGRO_CLIENT_ID:-}
       TRAPLINE_ALLEGRO_CLIENT_SECRET: ${ALLEGRO_CLIENT_SECRET:-}
+      # Vygenerovaný User-Agent z apps.developer.allegro.pl (povinný).
+      TRAPLINE_ALLEGRO_USER_AGENT: ${ALLEGRO_USER_AGENT:-}
       TRAPLINE_NTFY_URL: ${NTFY_URL:-https://ntfy.sh/}
       TRAPLINE_NTFY_TOPIC: ${NTFY_TOPIC:-}
       # Serverový browser (TrueNasBrowser.yaml) pro eshopy blokující přímý

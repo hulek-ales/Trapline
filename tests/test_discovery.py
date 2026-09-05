@@ -375,3 +375,38 @@ def test_upsert_sloucí_ruzne_nazvy_napric_obchody(client, monkeypatch):
         s.commit()
         pe = discovery._upsert_product(s, e)
         assert pd_.id != pe.id
+
+
+def test_products_vraci_obchody_s_cenou_a_trendem(client, monkeypatch):
+    """Každý produkt nese seznam nabídek: obchod, odkaz, cena a předchozí
+    cena pro šipku trendu; nejlevnější první."""
+    from trapline.models import Offer, PriceHistory, Source
+
+    with Session(db._engine) as s:
+        src = _src(s)
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
+        discovery.run_source(s, src)
+        product = s.scalars(select(Product)).one()
+        # druhá nabídka jinde, levnější, a s historií (dřív dražší)
+        other = Offer(
+            product_id=product.id, source=Source.JSONLD, shop="alza.cz",
+            sku="A1", url="https://www.alza.cz/x-d1.htm",
+        )
+        s.add(other)
+        s.flush()
+        s.add(PriceHistory(offer_id=other.id, price=5999.0))
+        s.add(PriceHistory(offer_id=other.id, price=4999.0, in_stock=False))
+        s.commit()
+
+    row = client.get("/api/discovery/products").json()[0]
+    shops = row["shops"]
+    assert [x["shop"] for x in shops] == ["alza.cz", "Shop A"]   # levnější první
+    alza = shops[0]
+    assert alza["price"] == 4999.0
+    assert alza["prev_price"] == 5999.0        # podklad pro šipku dolů
+    assert alza["in_stock"] is False
+    assert alza["url"] == "https://www.alza.cz/x-d1.htm"
+    assert alza["source"] == "jsonld"
+    # feedová nabídka má jen jednu cenu → žádný trend
+    assert shops[1]["prev_price"] is None
+    assert row["price_min"] == 4999.0

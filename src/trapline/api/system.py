@@ -81,6 +81,29 @@ def _failures_dir() -> Path:
     return Path(settings.snapshot_dir) / "failures"
 
 
+@router.get("/integrations")
+def integrations():
+    """Co je nakonfigurované — ať se nemusí hádat z logů. Nikdy nevrací
+    hesla ani klíče, jen jestli jsou vyplněné."""
+    return {
+        "ollama": {"configured": bool(settings.ollama_url), "url": settings.ollama_url},
+        "searxng": {"configured": bool(settings.searxng_url)},
+        "browser": {"configured": settings.browser_enabled},
+        "ntfy": {
+            "configured": bool(settings.ntfy_topic),
+            "hint": "" if settings.ntfy_topic else "nastav TRAPLINE_NTFY_TOPIC",
+        },
+        "allegro": {
+            "configured": settings.allegro_enabled,
+            "user_agent": bool(settings.allegro_user_agent),
+            "hint": (
+                "" if settings.allegro_enabled
+                else "vyplň TRAPLINE_ALLEGRO_CLIENT_ID a _SECRET"
+            ),
+        },
+    }
+
+
 @router.get("/failures")
 def failures_list():
     """Tichá selhání extrakce (ADR-0007) — stránky, ze kterých nešla vytáhnout
