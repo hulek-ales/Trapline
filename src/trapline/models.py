@@ -59,7 +59,9 @@ class Source(enum.StrEnum):
 
     @property
     def is_secondary(self) -> bool:
-        return self in {Source.SBAZAR, Source.BAZOS, Source.AUKRO}
+        return self in {
+            Source.SBAZAR, Source.BAZOS, Source.AUKRO, Source.ALLEGRO,
+        }
 
 
 class Verdict(enum.StrEnum):
