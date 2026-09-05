@@ -1,6 +1,7 @@
 # ADR-0008: Bazary — Bazoš, Sbazar, Allegro
 
-Datum: 2026-08-19. Stav: přijato, v1 implementováno (Bazoš + Sbazar + Allegro).
+Datum: 2026-08-19. Stav: přijato, v1 implementováno (Bazoš + Sbazar;
+Allegro hotové, ale zavřené — viz níž).
 
 ## Kontext
 
@@ -53,6 +54,21 @@ Tři věci, které API neumí a řeší se jinak:
 `TRAPLINE_ALLEGRO_USER_AGENT` smí zůstat prázdný — Allegro žádný závazný
 řetězec negeneruje, chce jen hlavičku identifikující aplikaci, takže se
 použije obyčejný `TRAPLINE_USER_AGENT`.
+
+**Zjištěno po nasazení (5. 9. 2026): `GET /offers/listing` je zavřený.**
+Token grantem `client_credentials` projde, ale výpis vrací 403
+`AccessDenied` — Allegro ho pouští jen „ověřeným aplikacím" a proces
+ověření nemá v portálu ani v dokumentaci popsanou cestu (viz otevřené
+issue [#11707](https://github.com/allegro/allegro-api/issues/11707)
+a [#12257](https://github.com/allegro/allegro-api/issues/12257), obě
+štítkovaná `brak_odpowiedzi`). Konektor tedy zůstává hotový a otestovaný,
+ale po prvním 403 se sám utlumí do restartu appky, aby každá obchůzka
+neposílala dotazy s předem známým výsledkem. Až bude aplikace ověřená,
+stačí appku restartovat.
+
+Scrapovat výpis Allegra místo API je vědomě **zamítnuté**: u zdroje,
+který oficiální API má a přístup k němu záměrně reguluje, by obcházení
+bylo něco jiného než u Sbazaru (ADR-0008 výš), kde alternativa neexistuje.
 
 ## Pipeline v1 (`bazar.py`)
 
