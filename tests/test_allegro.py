@@ -200,3 +200,21 @@ def test_alive_jen_404_znamena_pryc(monkeypatch):
     # Nejistota nesmí inzerát pohřbít.
     monkeypatch.setattr(httpx, "head", _blokace)
     assert allegro.alive("111") is True
+
+
+def test_status_pojmenuje_zavadu(monkeypatch):
+    """Diagnostika nesmí padat — má říct, kde to vázne."""
+    from fastapi.testclient import TestClient
+
+    from trapline.api.main import app
+
+    monkeypatch.setattr(settings, "app_password", "")
+    monkeypatch.setattr(
+        httpx, "post", lambda *a, **kw: httpx.Response(403, text="forbidden")
+    )
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: httpx.Response(500))
+    d = TestClient(app).get("/api/system/allegro").json()
+    assert d["configured"] is True
+    assert d["token"] is False
+    assert "403" in d["error"]
+    assert "secret" not in str(d)
