@@ -218,3 +218,28 @@ def test_status_pojmenuje_zavadu(monkeypatch):
     assert d["token"] is False
     assert "403" in d["error"]
     assert "secret" not in str(d)
+
+
+def test_403_utlumi_dalsi_pokusy(monkeypatch):
+    """Neověřená aplikace dostane 403 pokaždé — nemá smysl na to posílat
+    tři dotazy na past a běh."""
+    calls = []
+
+    def _get(*a, **kw):
+        calls.append(1)
+        return httpx.Response(403, text='{"errors":[{"code":"AccessDenied"}]}')
+
+    monkeypatch.setattr(httpx, "get", _get)
+    monkeypatch.setattr(allegro, "token", lambda: "tok")
+    with pytest.raises(allegro.AllegroDenied, match="ověřeným"):
+        allegro.search("hamak")
+    with pytest.raises(allegro.AllegroDenied):
+        allegro.search("stan")
+    assert len(calls) == 1
+
+    # Restart appky (nebo nové klíče) útlum sundá.
+    allegro.reset_token()
+    monkeypatch.setattr(allegro, "token", lambda: "tok")
+    with pytest.raises(allegro.AllegroDenied):
+        allegro.search("hamak")
+    assert len(calls) == 2

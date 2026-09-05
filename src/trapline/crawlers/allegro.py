@@ -12,6 +12,13 @@ API neposílá ve výpisu popis inzerátu; místo něj se skládá text
 z parametrů nabídky (hlavně ``Stan`` — nová/použitá) a z ceny dopravy,
 aby měl LLM co hodnotit. Detail nabídky je v API vyhrazený prodejci,
 takže „žije ještě?" se zjišťuje ze stavu veřejné stránky nabídky.
+
+Pozor: ``GET /offers/listing`` Allegro pouští jen **ověřeným aplikacím**.
+Neověřená dostane 403 ``AccessDenied`` a ověření se nedá vyžádat z portálu.
+Dokud aplikace ověřená není, konektor se po prvním takovém odmítnutí sám
+utlumí do restartu — jinak by každá obchůzka posílala desítky požadavků,
+o kterých dopředu víme, že skončí stejně (stejný princip jako
+``transport._browser_first``).
 """
 
 from __future__ import annotations
@@ -37,10 +44,16 @@ TOKEN_MARGIN_S = 60.0
 
 _token: str = ""
 _token_until: float = 0.0
+#: Allegro odmítlo výpis kvůli neověřené aplikaci — do restartu se nezkouší.
+_denied: str = ""
 
 
 class AllegroError(RuntimeError):
     """Allegro odmítlo klíč nebo požadavek."""
+
+
+class AllegroDenied(AllegroError):
+    """Aplikace není ověřená — výpis nabídek je pro ni zavřený."""
 
 
 @dataclass(slots=True)
@@ -56,9 +69,9 @@ class AllegroAd:
 
 
 def reset_token() -> None:
-    """Zahoď token — pro testy a po změně klíčů."""
-    global _token, _token_until
-    _token, _token_until = "", 0.0
+    """Zahoď token i útlum — pro testy a po změně klíčů."""
+    global _token, _token_until, _denied
+    _token, _token_until, _denied = "", 0.0, ""
 
 
 def token() -> str:
@@ -156,6 +169,9 @@ def _from_offer(offer: dict) -> AllegroAd | None:
 
 def search(phrase: str, limit: int = 30) -> list[AllegroAd]:
     """Veřejný výpis nabídek k frázi. Ceny už v korunách."""
+    global _denied
+    if _denied:
+        raise AllegroDenied(_denied)
     resp = httpx.get(
         f"{API_URL}/offers/listing",
         params={"phrase": phrase, "limit": max(1, min(limit, 60))},
@@ -165,6 +181,13 @@ def search(phrase: str, limit: int = 30) -> list[AllegroAd]:
     if resp.status_code == 401:
         reset_token()
         raise AllegroError("token neplatný (401) — klíč nebo scope aplikace")
+    if resp.status_code == 403:
+        _denied = (
+            "Allegro pouští výpis nabídek jen ověřeným aplikacím (403 "
+            "AccessDenied) — do restartu appky se už nezkouší"
+        )
+        log.warning("allegro: %s", _denied)
+        raise AllegroDenied(_denied)
     if resp.status_code != 200:
         raise AllegroError(f"hledání selhalo ({resp.status_code}): {resp.text[:200]}")
     items = resp.json().get("items") or {}
@@ -214,6 +237,10 @@ def status(phrase: str = "lodówka turystyczna") -> dict:
     out["token"] = True
     try:
         ads = search(phrase, 5)
+    except AllegroDenied as exc:
+        out["denied"] = True
+        out["error"] = str(exc)
+        return out
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)
         return out
