@@ -21,6 +21,7 @@ from fastapi.responses import PlainTextResponse
 
 from .. import logbuffer, transport, watcher
 from ..config import settings
+from ..crawlers import allegro
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -72,6 +73,13 @@ def browser():
     """Stav serverového browseru (browserless) — poslední stupeň transportní
     vrstvy pro eshopy blokující obyčejný HTTP fetch (ADR-0006)."""
     return transport.browser_status()
+
+
+@router.get("/allegro")
+def allegro_status():
+    """Stav Allegro konektoru (ADR-0008) — projde klíč, známe kurz zlotého
+    a vrací API nabídky? Klíče se nevracejí, jen výsledek."""
+    return allegro.status()
 
 
 _FAILURE_NAME = re.compile(r"[a-z0-9._-]+\.html\.gz")

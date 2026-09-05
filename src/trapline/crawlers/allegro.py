@@ -190,3 +190,35 @@ def alive(ext_id: str) -> bool:
     except Exception:  # noqa: BLE001
         return True
     return resp.status_code != 404
+
+
+def status(phrase: str = "lodówka turystyczna") -> dict:
+    """Diagnostika pro GUI: projde klíč, jede kurz, vrací API nabídky?
+
+    Nesmí padat — smyslem je pojmenovat, kde to vázne, ne shodit endpoint.
+    """
+    out: dict = {
+        "configured": settings.allegro_enabled,
+        "user_agent": settings.allegro_user_agent,
+        "pln_czk": fx.rate("PLN"),
+    }
+    if not settings.allegro_enabled:
+        out["error"] = "vyplň TRAPLINE_ALLEGRO_CLIENT_ID a _SECRET"
+        return out
+    try:
+        token()
+    except Exception as exc:  # noqa: BLE001
+        out["token"] = False
+        out["error"] = str(exc)
+        return out
+    out["token"] = True
+    try:
+        ads = search(phrase, 5)
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = str(exc)
+        return out
+    out["found"] = len(ads)
+    out["sample"] = [
+        {"title": ad.title, "price": ad.price, "url": ad.url} for ad in ads[:3]
+    ]
+    return out
