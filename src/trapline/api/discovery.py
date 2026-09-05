@@ -176,6 +176,19 @@ class MatchOut(BaseModel):
     breakdown: list
 
 
+class ShopOut(BaseModel):
+    """Jedna nabídka produktu: kde, za kolik a kam se cena hnula."""
+
+    shop: str
+    url: str
+    source: str
+    price: float | None
+    #: Předchozí zapsaná cena — z ní GUI kreslí šipku trendu.
+    prev_price: float | None = None
+    in_stock: bool = True
+    checked: str | None = None
+
+
 class ProductOut(BaseModel):
     id: int
     ean: str | None
@@ -186,6 +199,8 @@ class ProductOut(BaseModel):
     price_min: float | None
     price_max: float | None
     urls: list[str]
+    #: Nabídky po obchodech, nejlevnější první.
+    shops: list[ShopOut] = []
     image: str | None = None
     #: Produkt má připnuté hlídání na Zboží.cz.
     has_zbozi: bool = False
@@ -197,6 +212,42 @@ class ProductOut(BaseModel):
     #: Barevné varianty sloučené do jednoho řádku (názvy). 1 = bez variant.
     variant_count: int = 1
     variant_titles: list[str] = []
+
+
+def _last_prices(session: Session, offer_ids: list[int]) -> dict[int, list]:
+    """{offer_id: [poslední cena, předchozí]} jedním dotazem.
+
+    Okenní funkce místo dotazu na nabídku — při stovkách hlídaných stránek
+    by N+1 protáhlo odpověď na desítky sekund.
+    """
+    if not offer_ids:
+        return {}
+    ranked = (
+        select(
+            PriceHistory.offer_id,
+            PriceHistory.price,
+            PriceHistory.in_stock,
+            func.row_number()
+            .over(
+                partition_by=PriceHistory.offer_id,
+                order_by=(PriceHistory.ts.desc(), PriceHistory.id.desc()),
+            )
+            .label("rn"),
+        )
+        .where(PriceHistory.offer_id.in_(offer_ids))
+        .subquery()
+    )
+    out: dict[int, list] = {}
+    for row in session.execute(select(ranked).where(ranked.c.rn <= 2)):
+        out.setdefault(row.offer_id, []).append(row)
+    for rows in out.values():
+        rows.sort(key=lambda r: r.rn)
+    return out
+
+
+def _by_price(shop: ShopOut) -> tuple[bool, float]:
+    """Řazení nabídek: nejlevnější první, neznámá cena nakonec."""
+    return (shop.price is None, shop.price or 0.0)
 
 
 @router.get("/products", response_model=list[ProductOut])
@@ -236,6 +287,9 @@ def list_products(
                 breakdown=m.breakdown or [],
             )
         )
+    history = _last_prices(
+        session, [o.id for p in products for o in p.offers if o.active]
+    )
     out: list[ProductOut] = []
     for product in products:
         specs = {
@@ -243,6 +297,7 @@ def list_products(
         }
         prices: list[float] = []
         urls: list[str] = []
+        shops: list[ShopOut] = []
         has_zbozi = False
         has_watch = False
         for offer in product.offers:
@@ -253,14 +308,23 @@ def list_products(
             if not offer.active:
                 continue
             urls.append(offer.url)
-            last = session.scalars(
-                select(PriceHistory)
-                .where(PriceHistory.offer_id == offer.id)
-                .order_by(PriceHistory.ts.desc())
-                .limit(1)
-            ).first()
+            rows = history.get(offer.id, [])
+            last = rows[0] if rows else None
+            prev = rows[1] if len(rows) > 1 else None
             if last:
                 prices.append(last.price)
+            shops.append(ShopOut(
+                shop=offer.shop,
+                url=offer.url,
+                source=offer.source.value,
+                price=last.price if last else None,
+                prev_price=prev.price if prev else None,
+                in_stock=bool(last.in_stock) if last else True,
+                checked=(
+                    offer.last_checked.isoformat() if offer.last_checked else None
+                ),
+            ))
+        shops.sort(key=_by_price)
         out.append(
             ProductOut(
                 id=product.id,
@@ -272,6 +336,7 @@ def list_products(
                 price_min=min(prices) if prices else None,
                 price_max=max(prices) if prices else None,
                 urls=urls,
+                shops=shops,
                 image=(product.specs or {}).get("_img"),
                 has_zbozi=has_zbozi,
                 has_watch=has_watch,
@@ -324,6 +389,9 @@ def _group_families(
                 price_min=min(prices) if prices else None,
                 price_max=max(prices) if prices else None,
                 urls=[u for m in members for u in m.urls],
+                shops=sorted(
+                    (s for m in members for s in m.shops), key=_by_price
+                ),
                 image=next((m.image for m in members if m.image), None),
                 has_zbozi=any(m.has_zbozi for m in members),
                 has_watch=any(m.has_watch for m in members),

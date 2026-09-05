@@ -57,6 +57,26 @@
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
   }
   .err { color: var(--warn); font-size: .88rem; }
+  .shopcell { cursor: pointer; }
+  .shoprow > td { background: var(--bg); padding: .5rem .6rem; }
+  .shopline {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem;
+    padding: .22rem 0; font-size: .86rem; border-bottom: 1px dotted var(--line);
+  }
+  .shopline:last-child { border-bottom: none; }
+  .shopline .name { flex: 1; min-width: 8rem; }
+  .shopline .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .down { color: var(--ok); }
+  .up { color: var(--warn); }
+  .filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem;
+    margin: .3rem 0 .6rem; font-size: .85rem;
+  }
+  .filters input[type=number] { width: 6rem; }
+  .filters select, .filters input {
+    font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
   #install-banner {
     position: fixed; left: .75rem; right: .75rem; bottom: .75rem; z-index: 20;
     display: flex; align-items: center; gap: .75rem; max-width: 40rem; margin: 0 auto;
@@ -153,6 +173,19 @@
       <button class="link" id="td-hunt" title="feedy obchodů + crawler produktových stránek (JSON-LD, i přes browser)">🔍 najít obchody a produkty</button>
       <span class="msg" id="td-hunt-msg"></span>
     </div>
+    <div class="filters">
+      <label>obchod <select id="td-shop"><option value="">všechny</option></select></label>
+      <label>cena od <input type="number" id="td-min" min="0" step="100" placeholder="—"></label>
+      <label>do <input type="number" id="td-max" min="0" step="100" placeholder="—"></label>
+      <label>řadit <select id="td-sort">
+        <option value="score">podle skóre</option>
+        <option value="price">od nejlevnějšího</option>
+        <option value="price-desc">od nejdražšího</option>
+        <option value="name">podle názvu</option>
+      </select></label>
+      <button class="link" id="td-reset">zrušit filtry</button>
+      <span class="meta" id="td-count"></span>
+    </div>
     <p class="empty" id="td-empty" hidden>Žádné výsledky — spusť skóring na hlavní stránce.</p>
     <table id="td-table" hidden>
       <thead><tr><th></th><th>Produkt</th><th>Cena</th><th>Skóre</th><th>Vyhodnocení požadavků</th><th></th></tr></thead>
@@ -203,6 +236,18 @@
     </div>
     <p class="subject">Všechny modely nalezené discovery — parametry, rozpětí cen, odkazy.
       <span class="meta" id="catalog-count"></span></p>
+    <div class="filters">
+      <label>obchod <select id="cat-shop"><option value="">všechny</option></select></label>
+      <label>cena od <input type="number" id="cat-min" min="0" step="100" placeholder="—"></label>
+      <label>do <input type="number" id="cat-max" min="0" step="100" placeholder="—"></label>
+      <label>řadit <select id="cat-sort">
+        <option value="new">od nejnovějších</option>
+        <option value="price">od nejlevnějšího</option>
+        <option value="price-desc">od nejdražšího</option>
+        <option value="name">podle názvu</option>
+      </select></label>
+      <button class="link" id="cat-reset">zrušit filtry</button>
+    </div>
     <p class="empty" id="catalog-empty" hidden>Zatím prázdný. Přidej zdroj feedu níž a spusť discovery.</p>
     <table id="catalog-table" hidden>
       <thead><tr><th></th><th>Produkt</th><th>Značka</th><th>Cena</th><th>Skóre</th><th>Obchody</th><th>Parametry</th></tr></thead>
@@ -271,6 +316,7 @@
       <span class="hint" id="ollama-status" style="margin:0"></span>
     </div>
     <p class="hint" id="browser-status" hidden></p>
+    <p class="hint" id="integrations"></p>
     <div class="loglist" id="loglist">—</div>
   </section>
 
@@ -439,6 +485,9 @@ function verdiktIkona(v) {
     : v === "nesplneno" ? '<span class="no">✗</span>' : '<span class="unk">?</span>';
 }
 
+// Data pasti drží stav, ať filtrování nemusí znovu na server.
+let tdData = { id: null, products: [] };
+
 async function renderTrapDetail(id) {
   let traps, products;
   try {
@@ -454,18 +503,29 @@ async function renderTrapDetail(id) {
   $("td-terms").textContent = (trap.query_terms || []).join(" · ")
     + (trap.budget_max ? ` · budget ${trap.budget_max} Kč` : "");
 
+  tdData = { id, products };
+  fillShopOptions("td-shop", products);
+  renderTrapRows();
+  loadTrapBazar(id);
+}
+
+function renderTrapRows() {
+  const id = tdData.id;
+  if (id == null) return;
   const onlyRel = $("td-only-rel").checked;
-  const rows = products
+  const f = readFilters("td");
+  const all = tdData.products
     .map((p) => ({ p, m: (p.matches || []).find((m) => m.criteria_id === id) }))
     .filter((r) => r.m && (!onlyRel || r.m.relevant))
     .sort((a, b) => b.m.score - a.m.score);
+  const rows = applyFilters(all, (r) => r.p, f);
+  $("td-count").textContent = rows.length === all.length
+    ? `${all.length} produktů` : `${rows.length} z ${all.length} produktů`;
   $("td-empty").hidden = rows.length > 0;
   $("td-table").hidden = rows.length === 0;
   $("td-body").innerHTML = rows.map(({ p, m }) => {
     const img = p.image ? `<img class="thumb" loading="lazy" src="${esc(p.image)}" alt="">` : "";
     const link = p.urls.length ? ` <a href="${esc(p.urls[0])}" target="_blank" rel="noopener">↗</a>` : "";
-    const cena = p.price_min == null ? "—"
-      : p.price_min === p.price_max ? `${p.price_min} Kč` : `${p.price_min}–${p.price_max} Kč`;
     const bd = (m.breakdown || []).map((b) =>
       `<div>${verdiktIkona(b.verdikt)} ${esc(b.pozadavek)}${b.pozn ? ` <span class="unk">— ${esc(b.pozn)}</span>` : ""}</div>`
     ).join("");
@@ -476,7 +536,7 @@ async function renderTrapDetail(id) {
     return `<tr data-pid="${p.id}" class="${v === "dislike" ? "inactive" : ""}">
       <td>${img}</td>
       <td>${esc(p.title)}${link}${stav}${p.variant_count > 1 ? `<div class="variants">${p.variant_count} varianty</div>` : ""}</td>
-      <td class="num">${esc(cena)}</td>
+      ${priceCell(p)}
       <td><span class="badge ${m.relevant ? "rel" : ""}">${Math.round(m.score)}${m.relevant ? " ✓" : ""}</span></td>
       <td class="bd">${bd}</td>
       <td>
@@ -485,13 +545,99 @@ async function renderTrapDetail(id) {
         <button class="link" data-z="1" title="${p.has_zbozi ? "Zboží.cz se hlídá — kliknutím přepiš URL" : "hlídat cenu přes Zboží.cz (vlož URL detailu)"}">${p.has_zbozi ? "Z✓" : "Z+"}</button>
         <button class="link" data-w="1" title="${p.has_watch ? "stránka eshopu se hlídá — kliknutím přidej další" : "hlídat cenu na stránce libovolného eshopu (Alza, Datart… — vlož URL detailu)"}">${p.has_watch ? "🌐✓" : "🌐+"}</button>
       </td>
-    </tr>`;
+    </tr>` + shopsHtml(p, 6);
   }).join("");
-  loadTrapBazar(id);
 }
 
 const STAV_CZ = { new: "nové", like_new: "jako nové", used: "použité",
                   damaged: "poškozené", unknown: "?" };
+
+// Ceny z feedů chodí na haléře („6498.99") — v seznamu stačí koruny.
+function fmtKc(v) {
+  return v == null ? "—" : Math.round(v).toLocaleString("cs") + " Kč";
+}
+
+// Šipka trendu proti minule zapsané ceně; beze změny nic nekreslíme.
+function trendHtml(price, prev) {
+  if (price == null || prev == null || Math.round(price) === Math.round(prev)) return "";
+  const diff = Math.round(price - prev);
+  const down = diff < 0;
+  return `<span class="${down ? "down" : "up"}" title="minule ${fmtKc(prev)}">`
+    + `${down ? "↓" : "↑"} ${Math.abs(diff).toLocaleString("cs")} Kč</span>`;
+}
+
+const SOURCE_CZ = { feed: "feed", jsonld: "stránka", zbozi: "Zboží.cz" };
+
+function shopsHtml(p, colspan) {
+  const list = (p.shops || []).map((s) => `
+    <div class="shopline">
+      <span class="name"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.shop)}</a>
+        <span class="meta">${esc(SOURCE_CZ[s.source] || s.source)}</span></span>
+      <span class="num">${fmtKc(s.price)}</span>
+      ${trendHtml(s.price, s.prev_price)}
+      ${s.in_stock === false ? '<span class="unk">není skladem</span>' : ""}
+    </div>`).join("");
+  return `<tr class="shoprow" hidden><td colspan="${colspan}">${list
+    || '<span class="empty">Žádná aktivní nabídka.</span>'}</td></tr>`;
+}
+
+// Cena v řádku: nejlevnější nabídka + rozpětí, klik rozbalí obchody.
+function priceCell(p) {
+  const n = (p.shops || []).length;
+  const range = p.price_min != null && p.price_max != null
+    && Math.round(p.price_min) !== Math.round(p.price_max)
+    ? `<div class="variants">až ${fmtKc(p.price_max)}</div>` : "";
+  return `<td class="num shopcell" data-shops="1" title="klikni pro seznam obchodů">
+    ${fmtKc(p.price_min)} ${n ? `<span class="meta">▾ ${n}×</span>` : ""}${range}</td>`;
+}
+
+// Klik na cenu = rozbal/sbal řádek s obchody.
+function toggleShops(cell) {
+  const row = cell.closest("tr");
+  const shops = row.nextElementSibling;
+  if (shops && shops.classList.contains("shoprow")) shops.hidden = !shops.hidden;
+}
+
+// Filtry (obchod / cena od-do) a řazení — společné pro past i katalog.
+function applyFilters(rows, get, f) {
+  let out = rows.filter((r) => {
+    const p = get(r);
+    if (f.shop && !(p.shops || []).some((s) => s.shop === f.shop)) return false;
+    const price = p.price_min;
+    if (f.min != null && (price == null || price < f.min)) return false;
+    if (f.max != null && (price == null || price > f.max)) return false;
+    return true;
+  });
+  const price = (r) => get(r).price_min ?? Infinity;
+  if (f.sort === "price") out.sort((a, b) => price(a) - price(b));
+  else if (f.sort === "price-desc") out.sort((a, b) => (price(b) === Infinity ? -1 : price(b)) - (price(a) === Infinity ? -1 : price(a)));
+  else if (f.sort === "name") out.sort((a, b) => get(a).title.localeCompare(get(b).title, "cs"));
+  return out;
+}
+
+function readFilters(prefix) {
+  const num = (id) => {
+    const v = parseFloat($(id).value);
+    return Number.isFinite(v) ? v : null;
+  };
+  return {
+    shop: $(prefix + "-shop").value,
+    min: num(prefix + "-min"),
+    max: num(prefix + "-max"),
+    sort: $(prefix + "-sort").value,
+  };
+}
+
+// Nabídku obchodů plníme z dat, ať tam nejsou obchody bez výsledku.
+function fillShopOptions(selectId, products) {
+  const sel = $(selectId);
+  const names = [...new Set(products.flatMap((p) => (p.shops || []).map((s) => s.shop)))]
+    .sort((a, b) => a.localeCompare(b, "cs"));
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">všechny</option>'
+    + names.map((n) => `<option${n === keep ? " selected" : ""}>${esc(n)}</option>`).join("");
+}
+
 
 async function loadTrapBazar(id) {
   let rows;
@@ -539,7 +685,20 @@ $("btn-catalog").onclick = () => { location.hash = "#katalog"; };
 
 window.addEventListener("hashchange", route);
 $("td-back").onclick = () => { location.hash = ""; };
-$("td-only-rel").onchange = route;
+$("td-only-rel").onchange = () => {
+  renderTrapRows();
+  if (tdData.id != null) loadTrapBazar(tdData.id);
+};
+for (const id of ["td-shop", "td-min", "td-max", "td-sort"]) {
+  $(id).oninput = renderTrapRows;
+}
+$("td-reset").onclick = () => {
+  for (const id of ["td-shop", "td-min", "td-max"]) $(id).value = "";
+  $("td-sort").value = "score";
+  $("td-only-rel").checked = false;
+  renderTrapRows();
+  if (tdData.id != null) loadTrapBazar(tdData.id);
+};
 
 $("td-hunt").onclick = async () => {
   const m = location.hash.match(/^#past\/(\d+)$/);
@@ -556,6 +715,8 @@ $("td-hunt").onclick = async () => {
 };
 
 $("td-body").onclick = async (e) => {
+  const shopCell = e.target.closest("td[data-shops]");
+  if (shopCell && !e.target.closest("a")) { toggleShops(shopCell); return; }
   const wbtn = e.target.closest("button[data-w]");
   if (wbtn) {
     const pid = Number(wbtn.closest("tr").dataset.pid);
@@ -696,6 +857,18 @@ async function loadOllama() {
   } catch { /* nepřihlášen nebo API mimo */ }
 }
 
+const INTEGRACE_CZ = { ollama: "LLM", searxng: "SearXNG", browser: "browser",
+                       ntfy: "notifikace", allegro: "Allegro" };
+
+async function loadIntegrations() {
+  let d;
+  try { d = await ok(await fetch("/api/system/integrations")); } catch { return; }
+  $("integrations").innerHTML = "Integrace: " + Object.entries(d).map(([k, v]) =>
+    `<span class="${v.configured ? "ok" : ""}" title="${esc(v.hint || "")}">`
+    + `${v.configured ? "✓" : "○"} ${esc(INTEGRACE_CZ[k] || k)}</span>`
+  ).join(" · ");
+}
+
 async function loadBrowser() {
   try {
     const b = await api.browser();
@@ -732,17 +905,25 @@ $("btn-score").onclick = async () => {
   }
 };
 
+let catData = [];
+
 async function loadCatalog() {
   let rows;
   try { rows = await api.products(); } catch { return; }
+  catData = rows;
   $("catalog").hidden = false;
-  $("catalog-count").textContent = rows.length || "";
-  $("catalog-empty").hidden = rows.length > 0;
+  fillShopOptions("cat-shop", rows);
+  renderCatalogRows();
+}
+
+function renderCatalogRows() {
+  const all = catData;
+  const rows = applyFilters(all, (p) => p, readFilters("cat"));
+  $("catalog-count").textContent = rows.length === all.length
+    ? (all.length || "") : `${rows.length} z ${all.length}`;
+  $("catalog-empty").hidden = all.length > 0;
   $("catalog-table").hidden = rows.length === 0;
   $("catalog-body").innerHTML = rows.map((p) => {
-    const price = p.price_min == null ? "—"
-      : p.price_min === p.price_max ? `${p.price_min} Kč`
-      : `${p.price_min}–${p.price_max} Kč`;
     const link = p.urls.length ? ` <a href="${esc(p.urls[0])}" target="_blank" rel="noopener">↗</a>` : "";
     const badges = (p.matches || []).map((m) => {
       const why = (m.breakdown || [])
@@ -754,17 +935,31 @@ async function loadCatalog() {
       ? `<img class="thumb" loading="lazy" src="${esc(p.image)}" alt="">` : "";
     const variants = p.variant_count > 1
       ? `<div class="variants" title="${esc(p.variant_titles.join("\n"))}">${p.variant_count} varianty</div>` : "";
-    return `<tr>
+    return `<tr data-pid="${p.id}">
       <td>${img}</td>
       <td>${esc(p.title)}${link}${variants}</td>
       <td>${esc(p.brand)}</td>
-      <td class="num">${esc(price)}</td>
+      ${priceCell(p)}
       <td>${badges || "—"}</td>
       <td class="num">${p.offers}</td>
       <td style="font-size:.78rem;opacity:.65">${esc(fmtSpecs(p.specs)).slice(0, 300)}</td>
-    </tr>`;
+    </tr>` + shopsHtml(p, 7);
   }).join("");
 }
+
+$("catalog-body").onclick = (e) => {
+  const cell = e.target.closest("td[data-shops]");
+  if (cell && !e.target.closest("a")) toggleShops(cell);
+};
+
+for (const id of ["cat-shop", "cat-min", "cat-max", "cat-sort"]) {
+  $(id).oninput = renderCatalogRows;
+}
+$("cat-reset").onclick = () => {
+  for (const id of ["cat-shop", "cat-min", "cat-max"]) $(id).value = "";
+  $("cat-sort").value = "new";
+  renderCatalogRows();
+};
 
 async function loadCrawled() {
   let rows;
@@ -969,6 +1164,7 @@ async function boot() {
   loadSources();
   loadOllama();
   loadBrowser();
+  loadIntegrations();
   loadProcs();
   loadAlerts();
   loadJobs();

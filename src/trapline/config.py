@@ -46,6 +46,13 @@ class Settings:
         self.ntfy_url: str = _env("NTFY_URL", "https://ntfy.sh/")
         self.ntfy_topic: str = _env("NTFY_TOPIC")
 
+        # --- Allegro REST API (ADR-0008) ---------------------------------
+        #: apps.developer.allegro.pl → registrace aplikace. User-Agent je
+        #: povinný, bez něj Allegro klíč zablokuje.
+        self.allegro_client_id: str = _env("ALLEGRO_CLIENT_ID")
+        self.allegro_client_secret: str = _env("ALLEGRO_CLIENT_SECRET")
+        self.allegro_user_agent: str = _env("ALLEGRO_USER_AGENT")
+
         # --- Serverový browser (ADR-0006) --------------------------------
         #: Základní URL browserless/chromium (TrueNasBrowser.yaml), např.
         #: http://172.24.1.111:30061. Prázdné = poslední stupeň transportní
@@ -93,6 +100,10 @@ class Settings:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.app_password)
+
+    @property
+    def allegro_enabled(self) -> bool:
+        return bool(self.allegro_client_id and self.allegro_client_secret)
 
     @property
     def browser_enabled(self) -> bool:
