@@ -312,6 +312,12 @@ def test_integrations_endpoint(monkeypatch):
 
     monkeypatch.setattr(settings, "allegro_client_id", "tajne-id")
     monkeypatch.setattr(settings, "allegro_client_secret", "tajny-secret")
+    monkeypatch.setattr(settings, "_allegro_user_agent", "")
+    monkeypatch.setattr(settings, "user_agent", "Trapline/0.1 (+odkaz)")
     d = TestClient(app).get("/api/system/integrations").json()
-    assert d["allegro"] == {"configured": True, "user_agent": False, "hint": ""}
+    assert d["allegro"] == {
+        "configured": True,
+        "user_agent": "Trapline/0.1 (+odkaz)",
+        "hint": "",
+    }
     assert "tajne-id" not in str(d) and "tajny-secret" not in str(d)

@@ -48,10 +48,11 @@ class Settings:
 
         # --- Allegro REST API (ADR-0008) ---------------------------------
         #: apps.developer.allegro.pl → registrace aplikace. User-Agent je
-        #: povinný, bez něj Allegro klíč zablokuje.
+        #: povinný, bez něj Allegro klíč zablokuje. Nemusí být zvláštní —
+        #: prázdné pole spadne na obyčejný TRAPLINE_USER_AGENT.
         self.allegro_client_id: str = _env("ALLEGRO_CLIENT_ID")
         self.allegro_client_secret: str = _env("ALLEGRO_CLIENT_SECRET")
-        self.allegro_user_agent: str = _env("ALLEGRO_USER_AGENT")
+        self._allegro_user_agent: str = _env("ALLEGRO_USER_AGENT")
 
         # --- Serverový browser (ADR-0006) --------------------------------
         #: Základní URL browserless/chromium (TrueNasBrowser.yaml), např.
@@ -100,6 +101,11 @@ class Settings:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.app_password)
+
+    @property
+    def allegro_user_agent(self) -> str:
+        """Hlavička pro Allegro API. Vlastní hodnota, jinak crawlerová."""
+        return self._allegro_user_agent or self.user_agent
 
     @property
     def allegro_enabled(self) -> bool:

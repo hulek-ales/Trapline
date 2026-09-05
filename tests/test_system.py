@@ -101,3 +101,14 @@ def test_gui_se_serviruje_na_korenu(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "Aktualizovat z Gitu" in r.text
+
+
+def test_allegro_user_agent_spada_na_crawlerovy(monkeypatch):
+    """Vlastní UA pro Allegro nemá důvod se lišit od crawlerového —
+    prázdné pole nesmí znamenat požadavek bez hlavičky."""
+    monkeypatch.setattr(settings, "_allegro_user_agent", "")
+    monkeypatch.setattr(settings, "user_agent", "Trapline/0.1 (+odkaz)")
+    assert settings.allegro_user_agent == "Trapline/0.1 (+odkaz)"
+
+    monkeypatch.setattr(settings, "_allegro_user_agent", "Vlastni/2.0")
+    assert settings.allegro_user_agent == "Vlastni/2.0"

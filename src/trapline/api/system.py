@@ -95,7 +95,7 @@ def integrations():
         },
         "allegro": {
             "configured": settings.allegro_enabled,
-            "user_agent": bool(settings.allegro_user_agent),
+            "user_agent": settings.allegro_user_agent,
             "hint": (
                 "" if settings.allegro_enabled
                 else "vyplň TRAPLINE_ALLEGRO_CLIENT_ID a _SECRET"

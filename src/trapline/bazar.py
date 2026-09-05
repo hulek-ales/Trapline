@@ -1,12 +1,12 @@
-"""Bazary: Bazoš + Sbazar → inzeráty → LLM vyhodnocení → alerty.
+"""Bazary: Bazoš + Sbazar + Allegro → inzeráty → LLM vyhodnocení → alerty.
 
 Jiná disciplína než eshopy: inzeráty žijí krátce, nemají EAN ani parametry
 a cena se nemění — hodnota je v rychlém zachycení nového kusu pod cenou.
 Proto per past:
 
   1. kandidáti — Bazoš: výpis 1–2 sekcí od nejnovějších (sekce vybírá LLM
-     z pevného seznamu, hledat robots nedovoluje); Sbazar: hledání frází
-     z předfiltru pasti,
+     z pevného seznamu, hledat robots nedovoluje); Sbazar a Allegro:
+     hledání frází z předfiltru pasti,
   2. levný filtr předfiltrem (název + krátký popis),
   3. nové kusy: detail → LLM verdikt proti požadavkům pasti + stav zboží
      + varovné signály (platba předem…) → ``ListingMatch``,
@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from . import db, llm
 from .alerts import send_ntfy
 from .config import settings
-from .crawlers import bazos, sbazar
+from .crawlers import allegro, bazos, sbazar
 from .crawlers.heureka_feed import normalize
 from .models import Alert, Condition, Criteria, Listing, ListingMatch, Source
 
@@ -39,6 +39,9 @@ BAZOS_PAGES = 3
 MAX_EVAL_PER_TRAP = 15
 #: Strop kontrol „žije ještě?" na běh.
 MAX_ALIVE_CHECKS = 20
+#: Kolik nabídek brát z Allegra na frázi — API je oficiální, ale placené
+#: limity jsou denní, tak ať se jedna past nevyžere celý den.
+ALLEGRO_LIMIT = 30
 
 _SECTION_SCHEMA = {
     "type": "object",
@@ -189,11 +192,26 @@ def _candidates(trap: Criteria) -> list[tuple[Source, object]]:
         except Exception as exc:  # noqa: BLE001
             log.warning("bazar: sbazar „%s“ selhal: %s", phrase, exc)
         time.sleep(settings.request_delay_s)
+        if not settings.allegro_enabled:
+            continue
+        try:
+            out.extend(
+                (Source.ALLEGRO, ad)
+                for ad in allegro.search(phrase, ALLEGRO_LIMIT)
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bazar: allegro „%s“ selhalo: %s", phrase, exc)
+        time.sleep(settings.request_delay_s)
     return out
 
 
 def _full_description(source: Source, listing: Listing) -> None:
-    """Doplň plný popis z detailu (Bazoš má ve výpisu jen zkrácený)."""
+    """Doplň plný popis z detailu (Bazoš má ve výpisu jen zkrácený).
+
+    Allegro detail nemá — API ho dává jen prodejci, takže popis poskládaný
+    z parametrů nabídky už je to nejlepší, co o kusu víme."""
+    if source == Source.ALLEGRO:
+        return
     try:
         if source == Source.BAZOS:
             text = bazos.fetch_detail(listing.url)
@@ -251,6 +269,8 @@ def _check_alive(session: Session) -> int:
         try:
             if listing.source == Source.BAZOS:
                 alive = bazos.fetch_detail(listing.url) is not None
+            elif listing.source == Source.ALLEGRO:
+                alive = allegro.alive(listing.ext_id)
             else:
                 _text, alive = sbazar.detail(listing.ext_id)
         except Exception:  # noqa: BLE001 — nejistota = nechat žít
