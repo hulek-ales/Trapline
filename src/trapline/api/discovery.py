@@ -250,6 +250,19 @@ def _by_price(shop: ShopOut) -> tuple[bool, float]:
     return (shop.price is None, shop.price or 0.0)
 
 
+def _dedup_shops(shops: list[ShopOut]) -> list[ShopOut]:
+    """Jedna URL = jeden řádek, nejlevnější první.
+
+    Feed občas nese pro jednu stránku víc položek (barevné varianty se
+    stejným odkazem) a slučování variant je pak sečte — v seznamu obchodů
+    by se tentýž řádek objevil dvakrát.
+    """
+    seen: dict[str, ShopOut] = {}
+    for shop in sorted(shops, key=_by_price):
+        seen.setdefault(shop.url, shop)
+    return sorted(seen.values(), key=_by_price)
+
+
 @router.get("/products", response_model=list[ProductOut])
 def list_products(
     session: DbSession, limit: int = 200, criteria_id: int | None = None
@@ -324,7 +337,7 @@ def list_products(
                     offer.last_checked.isoformat() if offer.last_checked else None
                 ),
             ))
-        shops.sort(key=_by_price)
+        shops = _dedup_shops(shops)
         out.append(
             ProductOut(
                 id=product.id,
@@ -389,9 +402,7 @@ def _group_families(
                 price_min=min(prices) if prices else None,
                 price_max=max(prices) if prices else None,
                 urls=[u for m in members for u in m.urls],
-                shops=sorted(
-                    (s for m in members for s in m.shops), key=_by_price
-                ),
+                shops=_dedup_shops([s for m in members for s in m.shops]),
                 image=next((m.image for m in members if m.image), None),
                 has_zbozi=any(m.has_zbozi for m in members),
                 has_watch=any(m.has_watch for m in members),

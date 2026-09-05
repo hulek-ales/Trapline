@@ -410,3 +410,26 @@ def test_products_vraci_obchody_s_cenou_a_trendem(client, monkeypatch):
     # feedová nabídka má jen jednu cenu → žádný trend
     assert shops[1]["prev_price"] is None
     assert row["price_min"] == 4999.0
+
+
+def test_products_nabidky_bez_duplicit(client, monkeypatch):
+    """Dvě položky feedu se stejnou URL (barevné varianty) = jeden řádek
+    obchodu, ne dva stejné."""
+    from trapline.models import Offer, PriceHistory, Source
+
+    with Session(db._engine) as s:
+        src = _src(s)
+        monkeypatch.setattr(discovery, "_fetch_items", lambda source: [_item()])
+        discovery.run_source(s, src)
+        product = s.scalars(select(Product)).one()
+        dup = Offer(
+            product_id=product.id, source=Source.HEUREKA_FEED, shop="Shop A",
+            sku="BBPF-30A-zelena", url=product.offers[0].url,
+        )
+        s.add(dup)
+        s.flush()
+        s.add(PriceHistory(offer_id=dup.id, price=5699.0))
+        s.commit()
+
+    shops = client.get("/api/discovery/products").json()[0]["shops"]
+    assert len(shops) == 1
