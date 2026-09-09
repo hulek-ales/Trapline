@@ -15,9 +15,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import db, logbuffer, watcher
+from .. import db, logbuffer, settings_store, watcher
 from ..config import settings
-from . import alerts, auth, criteria, discovery, feedback, scoring, system
+from . import admin, alerts, auth, criteria, discovery, feedback, scoring, system
 
 log = logging.getLogger("trapline.api")
 
@@ -48,7 +48,14 @@ async def lifespan(_: FastAPI):
     _warn_o_zabezpeceni()
     # Nezdar nevadí — start na DB nečeká, doménové endpointy vrací 503
     # a při dalším requestu se o inicializaci pokusí znovu.
-    db.ensure_ready()
+    if db.ensure_ready():
+        # Nastavení z GUI má přednost před prostředím (ADR-0010) — musí
+        # být načtené dřív, než obchůzka poprvé sáhne na LLM.
+        try:
+            with db.open_session() as session:
+                settings_store.load_overrides(session)
+        except Exception:  # noqa: BLE001 — bez toho jede prostředí
+            log.exception("nastavení z DB se nepodařilo načíst")
     try:
         watcher.start()
     except Exception:  # noqa: BLE001 — bez plánovače appka pořád funguje
@@ -65,6 +72,7 @@ app.include_router(discovery.router)
 app.include_router(scoring.router)
 app.include_router(feedback.router)
 app.include_router(alerts.router)
+app.include_router(admin.router)
 
 
 @app.middleware("http")
