@@ -383,3 +383,16 @@ class Alert(Base):
     score: Mapped[float] = mapped_column(Float)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     sent_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AppSetting(Base):
+    """Nastavení uložené z GUI (ADR-0010). Klíč = atribut ``settings``;
+    hodnota je text, přetypování dělá ``settings_store``."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )

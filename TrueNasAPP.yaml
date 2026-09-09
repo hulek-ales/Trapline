@@ -31,6 +31,8 @@ services:
       TRAPLINE_DB_URL: >-
         mysql+pymysql://trapline:${DB_PASSWORD:-traplineVychoziHeslo}@db:3306/trapline?charset=utf8mb4
       # LLM: holá Ollama, nebo Ollama proxy (https://ollamaproxy.aleshulek.cz).
+      # Tohle jsou výchozí hodnoty — co uložíš v GUI (Administrace), má
+      # přednost a přežije přenasazení (ADR-0010).
       # S klíčem (opx_… z /ui/keys proxy) jde každé volání s Bearer a před
       # inferencí se model objedná u plánovače GPU — viz ADR-0009.
       TRAPLINE_OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}

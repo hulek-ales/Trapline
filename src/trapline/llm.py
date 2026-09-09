@@ -41,6 +41,12 @@ class LlmBusy(RuntimeError):
     """GPU se ve lhůtě neuvolnilo, nebo proxy odmítla kvůli limitům."""
 
 
+def reset_state() -> None:
+    """Po změně URL/klíče z GUI: plánovač se má zkusit znovu."""
+    global _scheduler_missing
+    _scheduler_missing = False
+
+
 def _base() -> str:
     return settings.ollama_url.rstrip("/")
 

@@ -134,6 +134,12 @@
   .bd .no { color: var(--warn); }
   .bd .unk { opacity: .55; }
   a.traplink { color: inherit; }
+  .adminform label { display: block; margin: .55rem 0; font-size: .9rem; }
+  .adminform input[type=text], .adminform input[type=password] {
+    display: block; width: 100%; max-width: 28rem; margin-top: .2rem;
+  }
+  .adminform input[type=number] { display: block; width: 8rem; margin-top: .2rem; }
+  .adminform .src { font-size: .75rem; opacity: .45; margin-left: .4rem; }
   .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--line); }
   .dot.on { background: var(--ok); animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
@@ -146,7 +152,10 @@
       <h1>Trapline</h1>
       <p>Pasti na podhodnocené nabídky — správa a údržba</p>
     </div>
-    <button class="link" id="btn-logout" hidden>Odhlásit</button>
+    <div class="actions" style="gap:1rem">
+      <button class="link" id="btn-admin" hidden>Administrace</button>
+      <button class="link" id="btn-logout" hidden>Odhlásit</button>
+    </div>
   </header>
 
   <!-- Brána: dokud není přihlášeno, obsah se ani nenačítá. -->
@@ -321,6 +330,36 @@
   </section>
 
   <!-- Panel se zobrazí jen když je UPDATE_ENABLED=true, stejně jako v Kuchařce. -->
+  <section id="admin" hidden>
+    <div class="row">
+      <h2>Administrace — LLM</h2>
+      <button class="link" id="admin-back">← zpět na přehled</button>
+    </div>
+    <p class="subject">Co tady uložíš, má přednost před proměnnými prostředí v YAML appky
+      a přežije přenasazení. Klíč se nikdy nezobrazuje.</p>
+    <form id="admin-form" class="adminform" autocomplete="off">
+      <label>Ollama / proxy URL<span class="src" id="adm-url-src"></span>
+        <input type="text" id="adm-url" placeholder="https://ollamaproxy.aleshulek.cz"></label>
+      <label>Klíč proxy (opx_…)<span class="src" id="adm-key-src"></span>
+        <input type="password" id="adm-key" placeholder="beze změny" autocomplete="new-password">
+        <button type="button" class="link" id="adm-key-clear" style="margin-top:.25rem">zapomenout klíč</button></label>
+      <label>Hlavní model (skóring, bazar)<span class="src" id="adm-main-src"></span>
+        <input type="text" id="adm-main" list="adm-models"></label>
+      <label>Rychlý model<span class="src" id="adm-bulk-src"></span>
+        <input type="text" id="adm-bulk" list="adm-models"></label>
+      <datalist id="adm-models"></datalist>
+      <label>Čekání na GPU ve frontě plánovače (s)<span class="src" id="adm-wait-src"></span>
+        <input type="number" id="adm-wait" min="0" step="30"></label>
+      <div class="actions" style="margin-top:.8rem">
+        <button type="submit" id="adm-save">Uložit</button>
+        <button type="button" class="ghost" id="adm-test">Otestovat spojení</button>
+        <button type="button" class="link" id="adm-reset">vrátit hodnoty z prostředí</button>
+        <span class="msg" id="adm-msg"></span>
+      </div>
+    </form>
+    <p class="hint" id="adm-status"></p>
+  </section>
+
   <section id="system" hidden>
     <div class="row">
       <h2>Verze a aktualizace</h2>
@@ -382,6 +421,12 @@ const api = {
   sourceDelete: (id) => fetch(`/api/discovery/sources/${id}`, { method: "DELETE" })
     .then((r) => { if (r.status === 401) { showLogin(); throw new Error("401"); }
                    if (!r.ok && r.status !== 204) throw new Error(r.status); }),
+  adminSettings: () => fetch("/api/admin/settings").then(ok),
+  adminSave: (v) => fetch("/api/admin/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v),
+  }).then(ok),
+  adminReset: () => fetch("/api/admin/settings/reset", { method: "POST" }).then(ok),
+  adminTest:  () => fetch("/api/admin/settings/test", { method: "POST" }).then(ok),
   discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
   discoveryStatus: () => fetch("/api/discovery/status").then(ok),
   // S criteria_id vrací server produkty oskórované danou pastí — jinak jen
@@ -465,8 +510,9 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog", "alerts"]) $(id).hidden = true;
+  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog", "alerts", "admin"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
+  $("btn-admin").hidden = true;
 }
 
 function fmtSpecs(specs) {
@@ -661,6 +707,16 @@ async function loadTrapBazar(id) {
 }
 
 function route() {
+  $("admin").hidden = true;
+  if (location.hash === "#administrace") {
+    for (const sec of SECTIONS) $(sec).hidden = true;
+    $("trap-detail").hidden = true;
+    $("catalog").hidden = true;
+    $("alerts").hidden = true;
+    $("admin").hidden = false;
+    loadAdmin();
+    return;
+  }
   const m = location.hash.match(/^#past\/(\d+)$/);
   if (m) {
     $("catalog").hidden = true;
@@ -681,6 +737,100 @@ function route() {
 }
 
 $("catalog-back").onclick = () => { location.hash = ""; };
+$("admin-back").onclick = () => { location.hash = ""; };
+$("btn-admin").onclick = () => { location.hash = "#administrace"; };
+
+// --- Administrace: nastavení LLM (ADR-0010) --------------------------------
+const ADM_SRC = { gui: "z GUI", env: "z prostředí" };
+
+function fillModelList(models) {
+  $("adm-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}">`).join("");
+}
+
+async function loadAdmin() {
+  let d;
+  try { d = await api.adminSettings(); } catch { return; }
+  const l = d.llm;
+  $("adm-url").value = l.ollama_url || "";
+  $("adm-key").value = "";
+  $("adm-key").placeholder = l.ollama_key_set ? "nastaven — nech prázdné pro beze změny" : "nenastaven";
+  $("adm-key-clear").hidden = !l.ollama_key_set;
+  $("adm-main").value = l.llm_main || "";
+  $("adm-bulk").value = l.llm_bulk || "";
+  $("adm-wait").value = l.llm_load_wait_s ?? 900;
+  const src = l.source || {};
+  $("adm-url-src").textContent = ADM_SRC[src.ollama_url] || "";
+  $("adm-key-src").textContent = ADM_SRC[src.ollama_key] || "";
+  $("adm-main-src").textContent = ADM_SRC[src.llm_main] || "";
+  $("adm-bulk-src").textContent = ADM_SRC[src.llm_bulk] || "";
+  $("adm-wait-src").textContent = ADM_SRC[src.llm_load_wait_s] || "";
+  $("adm-msg").textContent = "";
+  admStatus();
+}
+
+function admStatusText(o) {
+  if (!o.reachable) return `LLM nedostupné: ${o.url || "URL nenastaveno"} (${o.error || ""})`;
+  let txt = `Připojeno k ${o.url} · modely: ${(o.models || []).join(", ")}`;
+  if (!o.model_available) txt += ` · POZOR: hlavní model ${o.model} na serveru není`;
+  if (o.proxy) {
+    const ps = o.proxy_status || {};
+    if (ps.reachable) {
+      const sch = ps.scheduler || {};
+      const loaded = Array.isArray(sch.loaded) ? sch.loaded.join(", ") : "";
+      txt += ` · proxy ✓ plánovač GPU${loaded ? ` (drží: ${loaded})` : ""}`;
+    } else {
+      txt += ` · proxy klíč neprošel (${ps.error || "?"})`;
+    }
+  } else {
+    txt += " · bez proxy (holá Ollama, bez plánovače)";
+  }
+  return txt;
+}
+
+async function admStatus() {
+  $("adm-status").textContent = "Zjišťuji stav…";
+  try {
+    const o = await api.adminTest();
+    fillModelList(o.models);
+    $("adm-status").textContent = admStatusText(o);
+  } catch { $("adm-status").textContent = ""; }
+}
+
+$("admin-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = {
+    ollama_url: $("adm-url").value.trim(),
+    llm_main: $("adm-main").value.trim(),
+    llm_bulk: $("adm-bulk").value.trim(),
+    llm_load_wait_s: Number($("adm-wait").value) || 0,
+  };
+  if ($("adm-key").value) body.ollama_key = $("adm-key").value;
+  $("adm-save").disabled = true;
+  $("adm-msg").textContent = "Ukládám…";
+  try {
+    await api.adminSave(body);
+    $("adm-msg").textContent = "Uloženo — platí hned, bez restartu.";
+    await loadAdmin();
+    loadOllama(); loadIntegrations();
+  } catch (err) {
+    $("adm-msg").textContent = `Uložení selhalo (${err.message}).`;
+  } finally { $("adm-save").disabled = false; }
+};
+
+$("adm-key-clear").onclick = async () => {
+  if (!confirm("Zapomenout uložený klíč proxy? Bez klíče pojede holá Ollama bez plánovače.")) return;
+  try { await api.adminSave({ ollama_key: "" }); await loadAdmin(); loadOllama(); loadIntegrations(); }
+  catch (err) { $("adm-msg").textContent = `Nepovedlo se (${err.message}).`; }
+};
+
+$("adm-test").onclick = admStatus;
+
+$("adm-reset").onclick = async () => {
+  if (!confirm("Zahodit všechno uložené v GUI a vrátit se k hodnotám z prostředí (YAML appky)?")) return;
+  try { await api.adminReset(); await loadAdmin(); loadOllama(); loadIntegrations();
+        $("adm-msg").textContent = "Vráceno na hodnoty z prostředí."; }
+  catch (err) { $("adm-msg").textContent = `Nepovedlo se (${err.message}).`; }
+};
 $("btn-catalog").onclick = () => { location.hash = "#katalog"; };
 
 window.addEventListener("hashchange", route);
@@ -1165,6 +1315,7 @@ async function boot() {
   if (st.required && !st.authenticated) { showLogin(); return; }
   $("login").hidden = true;
   $("btn-logout").hidden = !st.required;
+  $("btn-admin").hidden = false;
   loadVersion();
   loadTraps();
   loadSources();
