@@ -22,7 +22,11 @@ DbSession = Annotated[Session, Depends(get_db)]
 @router.get("/ollama")
 def ollama_status():
     """Dosažitelnost Ollamy z kontejneru — diagnostika sítě bez hádání."""
-    out = {"url": settings.ollama_url, "model": settings.llm_main}
+    out = {
+        "url": settings.ollama_url,
+        "model": settings.llm_main,
+        "proxy": settings.llm_proxy_enabled,
+    }
     if not settings.ollama_url:
         return {**out, "reachable": False, "error": "OLLAMA_URL není nastavené."}
     try:
@@ -33,7 +37,7 @@ def ollama_status():
     # starší Ollama /api/ps nemusí mít — diagnostika bez něj pořád funguje
     with contextlib.suppress(Exception):
         running = llm.running_models()
-    return {
+    result = {
         **out,
         "reachable": True,
         "model_available": settings.llm_main in models,
@@ -42,6 +46,10 @@ def ollama_status():
         # = řádové zpomalení generování
         "running": running,
     }
+    if settings.llm_proxy_enabled:
+        # plánovač: kdo drží GPU a jak dlouhá je fronta (ADR-0009)
+        result["proxy_status"] = llm.proxy_status()
+    return result
 
 
 @router.post("/run", status_code=202)

@@ -94,7 +94,15 @@ def integrations():
     """Co je nakonfigurované — ať se nemusí hádat z logů. Nikdy nevrací
     hesla ani klíče, jen jestli jsou vyplněné."""
     return {
-        "ollama": {"configured": bool(settings.ollama_url), "url": settings.ollama_url},
+        "ollama": {
+            "configured": bool(settings.ollama_url),
+            "url": settings.ollama_url,
+            # přes proxy = plánovač GPU a log tokenů (ADR-0009)
+            "proxy": settings.llm_proxy_enabled,
+            "hint": "" if settings.llm_proxy_enabled else (
+                "vyplň TRAPLINE_OLLAMA_KEY pro plánovač GPU"
+            ),
+        },
         "searxng": {"configured": bool(settings.searxng_url)},
         "browser": {"configured": settings.browser_enabled},
         "ntfy": {
