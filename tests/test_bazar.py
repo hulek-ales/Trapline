@@ -149,6 +149,9 @@ def _wire(monkeypatch, ads_bazos=(), ads_sbazar=(), **llm_kw):
     monkeypatch.setattr(
         bazar.sbazar, "search", lambda phrase, limit=40: list(ads_sbazar))
     monkeypatch.setattr(bazar.sbazar, "detail", lambda ext: ("Popis.", True))
+    # Aukro nemá zapínač jako Allegro — bez stubu by test šel na síť.
+    monkeypatch.setattr(bazar.aukro, "search", lambda phrase: [])
+    monkeypatch.setattr(bazar.aukro, "detail", lambda url: (None, True))
     monkeypatch.setattr(bazar.llm, "chat_json", _fake_llm(**llm_kw))
     monkeypatch.setattr(bazar, "send_ntfy", lambda *a, **kw: True)
 

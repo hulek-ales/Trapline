@@ -1,7 +1,7 @@
-# ADR-0008: Bazary — Bazoš, Sbazar, Allegro
+# ADR-0008: Bazary — Bazoš, Sbazar, Aukro, Allegro
 
-Datum: 2026-08-19. Stav: přijato, v1 implementováno (Bazoš + Sbazar;
-Allegro hotové, ale zavřené — viz níž).
+Datum: 2026-08-19. Stav: přijato, v1 implementováno (Bazoš + Sbazar +
+Aukro; Allegro hotové, ale zavřené — viz níž).
 
 ## Kontext
 
@@ -29,6 +29,38 @@ Uživatel byl na rozpor upozorněn a **výslovně rozhodl Sbazar zapojit**
 (stejné API a menší objem než běžná návštěva webu prohlížečem), identifikace
 vlastním User-Agentem, pauzy mezi požadavky. Kdyby Seznam přístup zablokoval,
 respektujeme to a Sbazar vypneme.
+
+### Aukro — stav stránky místo API (9. 9. 2026)
+
+Průzkum dalších bazarů (Aukro, Vinted, Hyperinzerce, Annonce, bazar.cz,
+Avizo, eBay, Kleinanzeigen, willhaben, OLX) vyhrálo Aukro: robots.txt
+zakazuje jen účet a košík, vyhledávání dovoluje. Oficiální Public API je
+jen pro prodejce („neposkytuje žádnou funkcionalitu pro přihazování ani
+nakupování"), ale stránka výsledků je Angular aplikace renderovaná na
+serveru a v `<script id="ng-state">` nese celou odpověď vyhledávacího
+backendu: id, název, cena, „kup teď", konec aukce, lokalita, atributy
+(**stav zboží**), **cesta kategorií** a prodejce. Strukturovaná data bez
+parsování HTML — a cesta kategorií je přesně ten typový signál, který
+u Bazoše a Sbazaru chybí.
+
+Detail má JSON-LD `Product` s popisem prodejce a `offers.availability`
+(`InStock` / `Discontinued`) — jediný spolehlivý signál „žije ještě?";
+slovo „ukončeno" je i na aktivní stránce v textech rozhraní.
+
+**Aukce**: `price` je jen aktuální příhoz, který může do konce vyrůst
+násobně. Čistá aukce (bez „kup teď") proto dostane do názvu prefix
+„Aukce:" — vidí ho GUI, alert i LLM — a v popisu konec aukce. Kde jde
+koupit hned, bere se cena „kup teď". `priceWithShipping` dává dopravné do
+`Listing.shipping`.
+
+Bonus: mezi prodejci je `Alza_prodej` — Alza přes Aukro rozprodává vrácené
+a poškozené zboží, takže „Alza bazar" (jinak za 403) přichází s tím.
+
+Zamítnuto ze stejného průzkumu: eBay (Buy API v produkci jen pro partnery,
+schválení „není zaručeno" — stejná zeď jako Allegro), Vinted (`Disallow: /`
++ výpis jen v prohlížeči), Avizo (403 blokace), Kleinanzeigen a willhaben
+(robots zakazují hledání), OLX.pl (403). Bazoš.sk a Annonce (Crawl-delay
+20 s) jsou další v pořadí.
 
 ### Allegro — oficiální API
 
@@ -72,7 +104,7 @@ bylo něco jiného než u Sbazaru (ADR-0008 výš), kde alternativa neexistuje.
 
 ## Pipeline v1 (`bazar.py`)
 
-kandidáti (výpisy Bazoše, hledání na Sbazaru a Allegru) → levný předfiltr → nové kusy: detail + LLM
+kandidáti (výpisy Bazoše, hledání na Sbazaru, Aukru a Allegru) → levný předfiltr → nové kusy: detail + LLM
 verdikt proti požadavkům pasti (splněno/nesplněno/nelze určit) + odhad
 stavu + varovné signály (platba předem…) → `Listing` + `ListingMatch`
 (nově `criteria_id` — v1 váže inzerát na past přímo, párování na produkt

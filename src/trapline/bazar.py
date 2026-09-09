@@ -1,11 +1,11 @@
-"""Bazary: Bazoš + Sbazar + Allegro → inzeráty → LLM vyhodnocení → alerty.
+"""Bazary: Bazoš + Sbazar + Aukro + Allegro → inzeráty → LLM vyhodnocení → alerty.
 
 Jiná disciplína než eshopy: inzeráty žijí krátce, nemají EAN ani parametry
 a cena se nemění — hodnota je v rychlém zachycení nového kusu pod cenou.
 Proto per past:
 
   1. kandidáti — Bazoš: výpis 1–2 sekcí od nejnovějších (sekce vybírá LLM
-     z pevného seznamu, hledat robots nedovoluje); Sbazar a Allegro:
+     z pevného seznamu, hledat robots nedovoluje); Sbazar, Aukro a Allegro:
      hledání frází z předfiltru pasti,
   2. levný filtr předfiltrem (název + krátký popis),
   3. nové kusy: detail → LLM verdikt proti požadavkům pasti + stav zboží
@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from . import db, llm
 from .alerts import send_ntfy
 from .config import settings
-from .crawlers import allegro, bazos, sbazar
+from .crawlers import allegro, aukro, bazos, sbazar
 from .crawlers.heureka_feed import normalize
 from .models import Alert, Condition, Criteria, Listing, ListingMatch, Source
 
@@ -167,6 +167,7 @@ def _upsert_listing(session: Session, source: Source, ad) -> tuple[Listing, bool
         title=ad.title,
         description=getattr(ad, "description", "") or None,
         price=ad.price if ad.price is not None else 0.0,
+        shipping=float(getattr(ad, "shipping", 0.0) or 0.0),
         locality=ad.locality or None,
     )
     session.add(row)
@@ -192,6 +193,11 @@ def _candidates(trap: Criteria) -> list[tuple[Source, object]]:
         except Exception as exc:  # noqa: BLE001
             log.warning("bazar: sbazar „%s“ selhal: %s", phrase, exc)
         time.sleep(settings.request_delay_s)
+        try:
+            out.extend((Source.AUKRO, ad) for ad in aukro.search(phrase))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bazar: aukro „%s“ selhalo: %s", phrase, exc)
+        time.sleep(settings.request_delay_s)
         if not settings.allegro_enabled:
             continue
         try:
@@ -215,6 +221,12 @@ def _full_description(source: Source, listing: Listing) -> None:
     try:
         if source == Source.BAZOS:
             text = bazos.fetch_detail(listing.url)
+        elif source == Source.AUKRO:
+            # Výpis už dal stav zboží a kategorii — popis prodejce se přidá,
+            # ne nahradí, ať LLM vidí obojí.
+            text, _alive = aukro.detail(listing.url)
+            if text:
+                text = f"{listing.description or ''}\n{text}".strip()
         else:
             text, _alive = sbazar.detail(listing.ext_id)
         if text:
@@ -271,6 +283,8 @@ def _check_alive(session: Session) -> int:
                 alive = bazos.fetch_detail(listing.url) is not None
             elif listing.source == Source.ALLEGRO:
                 alive = allegro.alive(listing.ext_id)
+            elif listing.source == Source.AUKRO:
+                _text, alive = aukro.detail(listing.url)
             else:
                 _text, alive = sbazar.detail(listing.ext_id)
         except Exception:  # noqa: BLE001 — nejistota = nechat žít
