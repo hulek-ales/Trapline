@@ -38,6 +38,12 @@ class Settings:
         )
 
         self.ollama_url: str = _env("OLLAMA_URL")
+        #: Klíč k Ollama proxy (``opx_…`` z /ui/keys). Prázdné = holá Ollama
+        #: bez plánovače; vyplněné = každé volání nese Bearer a před inferencí
+        #: se model objedná přes /mgmt/v1/models/load (ADR-0009).
+        self.ollama_key: str = _env("OLLAMA_KEY")
+        #: Kolik sekund celkem čekat ve frontě plánovače na GPU, než to vzdáme.
+        self.llm_load_wait_s: float = float(_env("LLM_LOAD_WAIT_S", "900"))
         #: SearXNG pro automatické hledání zdrojů (feedhunt). Prázdné = vypnuto.
         self.searxng_url: str = _env("SEARXNG_URL")
         self.llm_bulk: str = _env("LLM_BULK", "qwen3:4b")
@@ -101,6 +107,10 @@ class Settings:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.app_password)
+
+    @property
+    def llm_proxy_enabled(self) -> bool:
+        return bool(self.ollama_url and self.ollama_key)
 
     @property
     def allegro_user_agent(self) -> str:

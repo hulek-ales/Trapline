@@ -852,7 +852,13 @@ async function loadOllama() {
     } else if (!o.model_available) {
       el.textContent = `LLM připojeno (${o.url}), ale model ${o.model} na serveru není. K dispozici: ${(o.models || []).join(", ")}`;
     } else {
-      el.textContent = `LLM připraveno: ${o.model} @ ${o.url}`;
+      let txt = `LLM připraveno: ${o.model} @ ${o.url}`;
+      if (o.proxy) {
+        const ps = o.proxy_status || {};
+        txt += ps.reachable ? " · přes proxy s plánovačem GPU"
+             : ` · proxy klíč neprošel (${ps.error || "?"})`;
+      }
+      el.textContent = txt;
     }
   } catch { /* nepřihlášen nebo API mimo */ }
 }
