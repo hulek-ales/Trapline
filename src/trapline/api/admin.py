@@ -1,4 +1,4 @@
-"""Administrace: nastavení LLM z GUI (ADR-0010).
+"""Administrace: nastavení LLM a údržba katalogu (ADR-0010).
 
 Všechno tady je za heslem jako zbytek ``/api``. Klíč proxy se přijímá,
 ale nikdy nevrací — GUI vidí jen, jestli je vyplněný.
@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import settings_store
+from .. import catalog, settings_store
 from .criteria import get_db
 from .scoring import ollama_status
 
@@ -29,6 +29,8 @@ class LlmSettingsIn(BaseModel):
     llm_main: str | None = None
     llm_bulk: str | None = None
     llm_load_wait_s: float | None = Field(None, ge=0, le=86400)
+    #: Od jakého skóre obchůzka hlídá cenu nerelevantního nálezu.
+    watch_min_score: float | None = Field(None, ge=0, le=100)
 
 
 @router.get("/settings")
@@ -53,3 +55,16 @@ def reset_settings(session: DbSession):
 def test_settings():
     """Ověř aktuální nastavení naostro — dosažitelnost, modely, proxy."""
     return ollama_status()
+
+
+@router.get("/catalog")
+def catalog_overview(session: DbSession):
+    """Co katalog obsahuje a co z toho obchůzka reálně obchází."""
+    return catalog.overview(session)
+
+
+@router.post("/catalog/purge")
+def catalog_purge(session: DbSession):
+    """Zahoď produkty, které nezná žádná aktivní past — i s cenami.
+    Nevratné; GUI se ptá předem."""
+    return catalog.purge_orphans(session)
