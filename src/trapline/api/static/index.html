@@ -354,6 +354,10 @@
         <input type="number" id="adm-score" min="0" max="100" step="5">
         <span class="hint" style="margin:.15rem 0 0">Relevantní nálezy se hlídají vždy.
           Nižší práh = přesnější odhad tržní ceny, ale delší obchůzka.</span></label>
+      <label>Smazat nepotřebný feed po (dnech)<span class="src" id="adm-feed-src"></span>
+        <input type="number" id="adm-feed" min="0" max="365" step="1">
+        <span class="hint" style="margin:.15rem 0 0">Feed, jehož produkty nezajímají
+          žádnou past, se nejdřív vypne. Po téhle lhůtě zmizí úplně. 0 = jen vypínat.</span></label>
       <div class="actions" style="margin-top:.8rem">
         <button type="submit" id="adm-save">Uložit</button>
         <button type="button" class="ghost" id="adm-test">Otestovat spojení</button>
@@ -372,6 +376,16 @@
       <button class="ghost" id="adm-cat-refresh">Přepočítat</button>
       <button id="adm-cat-purge">Uklidit sirotky</button>
       <span class="msg" id="adm-cat-msg"></span>
+    </div>
+
+    <div class="row" style="margin-top:1.4rem"><h2 style="font-size:1rem">Zdroje feedů</h2>
+      <span class="meta" id="adm-feeds-count"></span></div>
+    <p class="subject">Feed, jehož produkty nezajímají žádnou past, se v obchůzce sám
+      vypne a po lhůtě smaže. Nový a dočasně nefunkční feed se nesahá.</p>
+    <p class="hint" id="adm-feeds" style="opacity:.75">—</p>
+    <div class="actions">
+      <button class="ghost" id="adm-feeds-review">Projít zdroje teď</button>
+      <span class="msg" id="adm-feeds-msg"></span>
     </div>
 
     <div id="system" hidden>
@@ -440,6 +454,8 @@ const api = {
   adminTest:  () => fetch("/api/admin/settings/test", { method: "POST" }).then(ok),
   adminCatalog: () => fetch("/api/admin/catalog").then(ok),
   adminPurge: () => fetch("/api/admin/catalog/purge", { method: "POST" }).then(ok),
+  adminFeeds: () => fetch("/api/admin/feeds").then(ok),
+  adminFeedsReview: () => fetch("/api/admin/feeds/review", { method: "POST" }).then(ok),
   discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
   discoveryStatus: () => fetch("/api/discovery/status").then(ok),
   // S criteria_id vrací server produkty oskórované danou pastí — jinak jen
@@ -772,6 +788,7 @@ async function loadAdmin() {
   $("adm-bulk").value = l.llm_bulk || "";
   $("adm-wait").value = l.llm_load_wait_s ?? 900;
   $("adm-score").value = l.watch_min_score ?? 40;
+  $("adm-feed").value = l.feed_purge_days ?? 14;
   const src = l.source || {};
   $("adm-url-src").textContent = ADM_SRC[src.ollama_url] || "";
   $("adm-key-src").textContent = ADM_SRC[src.ollama_key] || "";
@@ -779,9 +796,11 @@ async function loadAdmin() {
   $("adm-bulk-src").textContent = ADM_SRC[src.llm_bulk] || "";
   $("adm-wait-src").textContent = ADM_SRC[src.llm_load_wait_s] || "";
   $("adm-score-src").textContent = ADM_SRC[src.watch_min_score] || "";
+  $("adm-feed-src").textContent = ADM_SRC[src.feed_purge_days] || "";
   $("adm-msg").textContent = "";
   admStatus();
   loadCatalogStats();
+  loadFeedStats();
 }
 
 // --- Administrace: katalog ------------------------------------------------
@@ -797,6 +816,38 @@ async function loadCatalogStats() {
 }
 
 $("adm-cat-refresh").onclick = loadCatalogStats;
+
+// --- Administrace: zdroje feedů -------------------------------------------
+async function loadFeedStats() {
+  let d;
+  try { d = await api.adminFeeds(); } catch { return; }
+  $("adm-feeds-count").textContent = `${d.sources} zdrojů`;
+  const cekaji = d.purge_days
+    ? `, smažou se po ${esc(d.purge_days)} dnech`
+    : ", mazání vypnuté";
+  $("adm-feeds").innerHTML = d.useless
+    ? `<b>${esc(d.serving)}</b> ještě někomu slouží · <b>${esc(d.useless)}</b> ne`
+      + ` (z toho ${esc(d.waiting_for_delete)} už vypnutých${cekaji})`
+    : `<b>${esc(d.serving)}</b> ze ${esc(d.sources)} slouží nějaké pasti, nepotřebný žádný.`;
+}
+
+$("adm-feeds-review").onclick = async () => {
+  $("adm-feeds-review").disabled = true;
+  $("adm-feeds-msg").textContent = "Procházím…";
+  try {
+    const r = await api.adminFeedsReview();
+    const casti = [];
+    if (r.disabled.length) casti.push(`vypnuto: ${esc(r.disabled.join(", "))}`);
+    if (r.deleted.length) casti.push(`smazáno: ${esc(r.deleted.join(", "))}`);
+    $("adm-feeds-msg").innerHTML = casti.length
+      ? casti.join(" · ")
+      : "Beze změny — všechny zdroje někomu slouží.";
+    loadFeedStats();
+    loadSources();
+  } catch (err) {
+    $("adm-feeds-msg").textContent = `Nepovedlo se (${err.message}).`;
+  } finally { $("adm-feeds-review").disabled = false; }
+};
 
 $("adm-cat-purge").onclick = async () => {
   let d;
@@ -852,6 +903,7 @@ $("admin-form").onsubmit = async (e) => {
     llm_bulk: $("adm-bulk").value.trim(),
     llm_load_wait_s: Number($("adm-wait").value) || 0,
     watch_min_score: Number($("adm-score").value) || 0,
+    feed_purge_days: Number($("adm-feed").value) || 0,
   };
   if ($("adm-key").value) body.ollama_key = $("adm-key").value;
   $("adm-save").disabled = true;

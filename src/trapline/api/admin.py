@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import catalog, settings_store
+from .. import catalog, feedcare, settings_store
 from .criteria import get_db
 from .scoring import ollama_status
 
@@ -31,6 +31,8 @@ class LlmSettingsIn(BaseModel):
     llm_load_wait_s: float | None = Field(None, ge=0, le=86400)
     #: Od jakého skóre obchůzka hlídá cenu nerelevantního nálezu.
     watch_min_score: float | None = Field(None, ge=0, le=100)
+    #: Po kolika dnech smazat feed, který nikomu neslouží (0 = nikdy).
+    feed_purge_days: int | None = Field(None, ge=0, le=365)
 
 
 @router.get("/settings")
@@ -68,3 +70,15 @@ def catalog_purge(session: DbSession):
     """Zahoď produkty, které nezná žádná aktivní past — i s cenami.
     Nevratné; GUI se ptá předem."""
     return catalog.purge_orphans(session)
+
+
+@router.get("/feeds")
+def feeds_overview(session: DbSession):
+    """Kolik zdrojů feedů ještě někomu slouží."""
+    return feedcare.overview(session)
+
+
+@router.post("/feeds/review")
+def feeds_review(session: DbSession):
+    """Projdi zdroje hned, bez čekání na obchůzku."""
+    return feedcare.review(session)

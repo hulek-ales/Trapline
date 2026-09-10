@@ -49,6 +49,10 @@ class Settings:
         #: takže kus na 5 bodů je ztráta času; širší vzorek ale zpřesňuje
         #: odhad tržní ceny, proto se neškrtá jen na relevantní.
         self.watch_min_score: float = float(_env("WATCH_MIN_SCORE", "40"))
+        #: Po kolika dnech se smaže zdroj feedu, který nikomu neslouží
+        #: (ADR-0011). Vypíná se hned; tohle je lhůta do smazání.
+        #: 0 = nemazat nikdy, jen vypínat.
+        self.feed_purge_days: int = int(float(_env("FEED_PURGE_DAYS", "14")))
         #: SearXNG pro automatické hledání zdrojů (feedhunt). Prázdné = vypnuto.
         self.searxng_url: str = _env("SEARXNG_URL")
         self.llm_bulk: str = _env("LLM_BULK", "qwen3:4b")

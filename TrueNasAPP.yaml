@@ -42,6 +42,10 @@ services:
       # Od jakého skóre obchůzka hlídá cenu nálezu, který past neoznačila
       # za relevantní (ADR-0011). Měnitelné v GUI → Administrace.
       TRAPLINE_WATCH_MIN_SCORE: ${WATCH_MIN_SCORE:-40}
+      # Po kolika dnech smazat zdroj feedu, který nikomu neslouží
+      # (ADR-0011). Nejdřív se vypne, mazání přijde až po lhůtě.
+      # 0 = nikdy nemazat, jen vypínat.
+      TRAPLINE_FEED_PURGE_DAYS: ${FEED_PURGE_DAYS:-14}
       TRAPLINE_LLM_BULK: ${LLM_BULK:-qwen3:4b}
       TRAPLINE_LLM_MAIN: ${LLM_MAIN:-qwen3:14b}
       TRAPLINE_ALLEGRO_CLIENT_ID: ${ALLEGRO_CLIENT_ID:-}
