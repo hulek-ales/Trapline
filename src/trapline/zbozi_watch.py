@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import db
+from . import catalog, db
 from .config import settings
 from .crawlers import zbozi
 from .models import Offer, PriceHistory, Product, Source
@@ -43,9 +43,17 @@ def refresh_all() -> int:
         offers = session.scalars(
             select(Offer).where(Offer.source == Source.ZBOZI, Offer.active)
         ).all()
+        # Stejně jako u hlídaných stránek: co žádná past nechce, neobcházíme.
+        offers, orphans = catalog.watched_offers(session, offers)
         if not offers:
+            if orphans:
+                log.info("zbozi: %d produktů nikdo nehlídá, přeskakuji", orphans)
             return 0
-        log.info("zbozi: obnovuji %d produktů", len(offers))
+        log.info(
+            "zbozi: obnovuji %d produktů%s",
+            len(offers),
+            f" ({orphans} nikdo nehlídá)" if orphans else "",
+        )
         for i, offer in enumerate(offers):
             if i:
                 time.sleep(settings.request_delay_s)

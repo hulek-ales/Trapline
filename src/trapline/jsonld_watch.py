@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import db, transport
+from . import catalog, db, transport
 from .config import settings
 from .crawlers import jsonld
 from .models import Offer, PriceHistory, Product, Source
@@ -113,9 +113,19 @@ def refresh_all() -> int:
         offers = session.scalars(
             select(Offer).where(Offer.source == Source.JSONLD, Offer.active)
         ).all()
+        # Stránky produktů, o které už žádná past nestojí (smazaná past,
+        # vypnutá past), se neobcházejí — jinak by obchůzka donekonečna
+        # stahovala nálezy po zrušených pastech (catalog).
+        offers, orphans = catalog.watched_offers(session, offers)
         if not offers:
+            if orphans:
+                log.info("jsonld: %d stránek nikdo nehlídá, přeskakuji", orphans)
             return 0
-        log.info("jsonld: obnovuji %d stránek", len(offers))
+        log.info(
+            "jsonld: obnovuji %d stránek%s",
+            len(offers),
+            f" ({orphans} nikdo nehlídá)" if orphans else "",
+        )
         for i, offer in enumerate(offers):
             if i:
                 time.sleep(settings.request_delay_s)
