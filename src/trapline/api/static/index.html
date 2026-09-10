@@ -223,7 +223,7 @@
     <p class="empty" id="traps-empty" hidden>Zatím žádné pasti. Přidej první níž.</p>
     <table id="traps-table" hidden>
       <thead>
-        <tr><th>Název</th><th>Požadavky</th><th>Budget</th><th></th><th></th><th></th></tr>
+        <tr><th>Název</th><th>Požadavky</th><th>Budget</th><th title="oskórováno / z toho relevantních / hlídaných stránek">Dopad</th><th></th><th></th><th></th></tr>
       </thead>
       <tbody id="traps-body"></tbody>
     </table>
@@ -350,6 +350,10 @@
       <datalist id="adm-models"></datalist>
       <label>Čekání na GPU ve frontě plánovače (s)<span class="src" id="adm-wait-src"></span>
         <input type="number" id="adm-wait" min="0" step="30"></label>
+      <label>Hlídat cenu od skóre<span class="src" id="adm-score-src"></span>
+        <input type="number" id="adm-score" min="0" max="100" step="5">
+        <span class="hint" style="margin:.15rem 0 0">Relevantní nálezy se hlídají vždy.
+          Nižší práh = přesnější odhad tržní ceny, ale delší obchůzka.</span></label>
       <div class="actions" style="margin-top:.8rem">
         <button type="submit" id="adm-save">Uložit</button>
         <button type="button" class="ghost" id="adm-test">Otestovat spojení</button>
@@ -358,28 +362,35 @@
       </div>
     </form>
     <p class="hint" id="adm-status"></p>
-  </section>
 
-  <section id="system" hidden>
-    <div class="row">
-      <h2>Verze a aktualizace</h2>
-      <span class="meta" id="ver">—</span>
-    </div>
-    <p class="subject" id="subject">—</p>
-    <p class="date" id="date"></p>
-
-    <p class="msg" id="check" hidden></p>
-
+    <div class="row" style="margin-top:1.4rem"><h2 style="font-size:1rem">Katalog</h2>
+      <span class="meta" id="adm-cat-count"></span></div>
+    <p class="subject">Produkty zůstávají v katalogu i po smazání pasti. Obchůzka je
+      neobchází, ale zabírají místo — tady je můžeš zahodit.</p>
+    <p class="hint" id="adm-cat" style="opacity:.75">—</p>
     <div class="actions">
-      <button class="ghost" id="btn-check">Zkontrolovat aktualizace</button>
-      <button id="btn-update">Aktualizovat z Gitu</button>
-      <span class="msg" id="msg"></span>
+      <button class="ghost" id="adm-cat-refresh">Přepočítat</button>
+      <button id="adm-cat-purge">Uklidit sirotky</button>
+      <span class="msg" id="adm-cat-msg"></span>
     </div>
 
-    <p class="hint" id="manual-hint" hidden>
-      Mimo Docker: po stažení je potřeba ručně restartovat API.
-    </p>
+    <div id="system" hidden>
+      <div class="row" style="margin-top:1.4rem"><h2 style="font-size:1rem">Verze a aktualizace</h2>
+        <span class="meta" id="ver">—</span></div>
+      <p class="subject" id="subject">—</p>
+      <p class="date" id="date"></p>
+      <p class="msg" id="check" hidden></p>
+      <div class="actions">
+        <button class="ghost" id="btn-check">Zkontrolovat aktualizace</button>
+        <button id="btn-update">Aktualizovat z Gitu</button>
+        <span class="msg" id="msg"></span>
+      </div>
+      <p class="hint" id="manual-hint" hidden>
+        Mimo Docker: po stažení je potřeba ručně restartovat API.
+      </p>
+    </div>
   </section>
+
 </div>
 
 <!-- Výzva k instalaci PWA — ukáže se jen když prohlížeč instalaci nabízí
@@ -427,6 +438,8 @@ const api = {
   }).then(ok),
   adminReset: () => fetch("/api/admin/settings/reset", { method: "POST" }).then(ok),
   adminTest:  () => fetch("/api/admin/settings/test", { method: "POST" }).then(ok),
+  adminCatalog: () => fetch("/api/admin/catalog").then(ok),
+  adminPurge: () => fetch("/api/admin/catalog/purge", { method: "POST" }).then(ok),
   discoveryRun:    () => fetch("/api/discovery/run", { method: "POST" }).then(ok),
   discoveryStatus: () => fetch("/api/discovery/status").then(ok),
   // S criteria_id vrací server produkty oskórované danou pastí — jinak jen
@@ -510,7 +523,7 @@ async function loadVersion() {
 
 function showLogin() {
   $("login").hidden = false;
-  for (const id of ["system", "traps", "sources", "procs", "trap-detail", "catalog", "alerts", "admin"]) $(id).hidden = true;
+  for (const id of ["traps", "sources", "procs", "trap-detail", "catalog", "alerts", "admin"]) $(id).hidden = true;
   $("btn-logout").hidden = true;
   $("btn-admin").hidden = true;
 }
@@ -524,7 +537,7 @@ function fmtSpecs(specs) {
   return parts.join(" · ");
 }
 
-const SECTIONS = ["traps", "sources", "procs", "system"];
+const SECTIONS = ["traps", "sources", "procs"];
 
 function verdiktIkona(v) {
   return v === "splneno" ? '<span class="ok2">✓</span>'
@@ -758,15 +771,50 @@ async function loadAdmin() {
   $("adm-main").value = l.llm_main || "";
   $("adm-bulk").value = l.llm_bulk || "";
   $("adm-wait").value = l.llm_load_wait_s ?? 900;
+  $("adm-score").value = l.watch_min_score ?? 40;
   const src = l.source || {};
   $("adm-url-src").textContent = ADM_SRC[src.ollama_url] || "";
   $("adm-key-src").textContent = ADM_SRC[src.ollama_key] || "";
   $("adm-main-src").textContent = ADM_SRC[src.llm_main] || "";
   $("adm-bulk-src").textContent = ADM_SRC[src.llm_bulk] || "";
   $("adm-wait-src").textContent = ADM_SRC[src.llm_load_wait_s] || "";
+  $("adm-score-src").textContent = ADM_SRC[src.watch_min_score] || "";
   $("adm-msg").textContent = "";
   admStatus();
+  loadCatalogStats();
 }
+
+// --- Administrace: katalog ------------------------------------------------
+async function loadCatalogStats() {
+  let d;
+  try { d = await api.adminCatalog(); } catch { return; }
+  $("adm-cat-count").textContent = `${d.products} produktů`;
+  $("adm-cat").innerHTML =
+    `<b>${esc(d.watched)}</b> se hlídá (${esc(d.watched_offers)} stránek v každé obchůzce)`
+    + ` · ${esc(d.below_threshold)} pod prahem ${esc(d.min_score)}`
+    + ` · <b>${esc(d.orphans)}</b> sirotků po smazaných pastech`;
+  $("adm-cat-purge").disabled = !d.orphans;
+}
+
+$("adm-cat-refresh").onclick = loadCatalogStats;
+
+$("adm-cat-purge").onclick = async () => {
+  let d;
+  try { d = await api.adminCatalog(); } catch { return; }
+  if (!d.orphans) return;
+  if (!confirm(`Nevratně smazat ${d.orphans} produktů, které nezná žádná aktivní past,`
+      + " včetně jejich cenové historie?")) return;
+  $("adm-cat-purge").disabled = true;
+  $("adm-cat-msg").textContent = "Uklízím…";
+  try {
+    const r = await api.adminPurge();
+    $("adm-cat-msg").textContent =
+      `Smazáno ${r.products} produktů, ${r.offers} nabídek, ${r.prices} cen.`;
+    loadCatalogStats();
+  } catch (err) {
+    $("adm-cat-msg").textContent = `Úklid selhal (${err.message}).`;
+  } finally { $("adm-cat-purge").disabled = false; }
+};
 
 function admStatusText(o) {
   if (!o.reachable) return `LLM nedostupné: ${o.url || "URL nenastaveno"} (${o.error || ""})`;
@@ -803,6 +851,7 @@ $("admin-form").onsubmit = async (e) => {
     llm_main: $("adm-main").value.trim(),
     llm_bulk: $("adm-bulk").value.trim(),
     llm_load_wait_s: Number($("adm-wait").value) || 0,
+    watch_min_score: Number($("adm-score").value) || 0,
   };
   if ($("adm-key").value) body.ollama_key = $("adm-key").value;
   $("adm-save").disabled = true;
@@ -1236,10 +1285,24 @@ async function loadTraps() {
       <td><a class="traplink" href="#past/${t.id}">${esc(t.name)}</a></td>
       <td>${esc((t.query_terms || []).join(", "))}</td>
       <td class="num">${t.budget_max ? esc(t.budget_max) + " Kč" : "—"}</td>
+      <td class="num">${dopadHtml(t)}</td>
       <td><button class="link" data-act="edit">upravit</button></td>
       <td><button class="link" data-act="toggle">${t.active ? "pozastavit" : "obnovit"}</button></td>
       <td><button class="link" data-act="del">smazat</button></td>
     </tr>`).join("");
+}
+
+// Dopad pasti: co drží a co kvůli ní obchůzka každých pár hodin obchází.
+// Bez tohohle čísla není vidět, že past s hrstkou relevantních nálezů
+// nechává systém stahovat stovky stránek.
+function dopadHtml(t) {
+  if (!t.scored) return '<span class="unk">—</span>';
+  const hunt = t.last_hunt
+    ? new Date(t.last_hunt + (/[Z+]/.test(t.last_hunt) ? "" : "Z")).toLocaleDateString("cs")
+    : "nikdy";
+  return `<span title="naposled hledány zdroje: ${esc(hunt)}">`
+    + `${esc(t.scored)} oskórováno · <span class="ok2">${esc(t.relevant)}</span> relevantních`
+    + ` · <b>${esc(t.watched_offers)}</b> hlídaných</span>`;
 }
 
 let trapRows = [];      // poslední načtený seznam — zdroj dat pro editaci

@@ -44,6 +44,11 @@ class Settings:
         self.ollama_key: str = _env("OLLAMA_KEY")
         #: Kolik sekund celkem čekat ve frontě plánovače na GPU, než to vzdáme.
         self.llm_load_wait_s: float = float(_env("LLM_LOAD_WAIT_S", "900"))
+        #: Od jakého skóre obchůzka hlídá cenu produktu, který past
+        #: neoznačila za relevantní (ADR-0011). Skóre se s cenou nemění,
+        #: takže kus na 5 bodů je ztráta času; širší vzorek ale zpřesňuje
+        #: odhad tržní ceny, proto se neškrtá jen na relevantní.
+        self.watch_min_score: float = float(_env("WATCH_MIN_SCORE", "40"))
         #: SearXNG pro automatické hledání zdrojů (feedhunt). Prázdné = vypnuto.
         self.searxng_url: str = _env("SEARXNG_URL")
         self.llm_bulk: str = _env("LLM_BULK", "qwen3:4b")

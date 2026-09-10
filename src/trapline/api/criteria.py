@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .. import db, scoring
+from .. import catalog, db, scoring
 from ..config import settings
 from ..models import Criteria, CriteriaMatch, Listing, ListingMatch, Product
 
@@ -56,6 +56,13 @@ class CriteriaOut(CriteriaIn):
 
     id: int
     created_at: datetime | None = None
+    last_hunt: datetime | None = None
+    #: Kolik produktů past oskórovala…
+    scored: int = 0
+    #: …z toho označila za relevantní…
+    relevant: int = 0
+    #: …a kolik stránek se kvůli ní reálně obchází v každé obchůzce.
+    watched_offers: int = 0
 
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -70,8 +77,19 @@ def _get_or_404(session: Session, criteria_id: int) -> Criteria:
 
 @router.get("", response_model=list[CriteriaOut])
 def list_criteria(session: DbSession):
+    """Pasti i s jejich dopadem — bez čísel není u pasti vidět, co drží
+    a co kvůli ní obchůzka každých pár hodin obchází."""
     rows = session.scalars(select(Criteria).order_by(Criteria.id)).all()
-    return rows
+    stats = catalog.trap_stats(session)
+    out = []
+    for row in rows:
+        item = CriteriaOut.model_validate(row)
+        numbers = stats.get(row.id) or {}
+        item.scored = numbers.get("scored", 0)
+        item.relevant = numbers.get("relevant", 0)
+        item.watched_offers = numbers.get("watched_offers", 0)
+        out.append(item)
+    return out
 
 
 @router.post("", response_model=CriteriaOut, status_code=201)
