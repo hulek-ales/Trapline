@@ -11,7 +11,15 @@ from sqlalchemy.pool import StaticPool
 from trapline import db, jsonld_watch, transport
 from trapline.api.main import app
 from trapline.config import settings
-from trapline.models import Base, Offer, PriceHistory, Product, Source
+from trapline.models import (
+    Base,
+    Criteria,
+    CriteriaMatch,
+    Offer,
+    PriceHistory,
+    Product,
+    Source,
+)
 
 
 def _product_html(price=5490, name="Lednička X 40 l", availability="InStock"):
@@ -47,6 +55,19 @@ def _product(title="Autochladnička X"):
         s.add(p)
         s.commit()
         return p.id
+
+
+def _hlida(pid, name="Past"):
+    """Aktivní past, která produkt chce — bez ní ho obnova cen přeskočí
+    jako sirotka po smazané pasti (catalog)."""
+    with Session(db._engine) as s:
+        trap = Criteria(name=name, query_terms=["x"], prefilter="x")
+        s.add(trap)
+        s.flush()
+        s.add(CriteriaMatch(
+            criteria_id=trap.id, product_id=pid, score=80.0, relevant=True,
+        ))
+        s.commit()
 
 
 def test_pripnuti_stranky(client, monkeypatch):
@@ -132,6 +153,7 @@ def test_refresh_all(client, monkeypatch):
         jsonld_watch.transport, "fetch",
         _fake_fetch(_product_html(price=4990, availability="OutOfStock")),
     )
+    _hlida(pid)
     assert jsonld_watch.refresh_all() == 1
     with Session(db._engine) as s:
         rows = s.scalars(select(PriceHistory)).all()

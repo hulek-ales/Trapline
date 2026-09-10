@@ -14,7 +14,15 @@ from trapline import db, zbozi_watch
 from trapline.api.main import app
 from trapline.config import settings
 from trapline.crawlers import zbozi
-from trapline.models import Base, Offer, PriceHistory, Product, Source
+from trapline.models import (
+    Base,
+    Criteria,
+    CriteriaMatch,
+    Offer,
+    PriceHistory,
+    Product,
+    Source,
+)
 
 
 def _detail_html(min_price=493000, released=1584374400, shop="Enatruck s.r.o."):
@@ -100,6 +108,19 @@ def _product(title="Autochladnička X"):
         return p.id
 
 
+def _hlida(pid, name="Past"):
+    """Aktivní past, která produkt chce — bez ní ho obnova cen přeskočí
+    jako sirotka po smazané pasti (catalog)."""
+    with Session(db._engine) as s:
+        trap = Criteria(name=name, query_terms=["x"], prefilter="x")
+        s.add(trap)
+        s.flush()
+        s.add(CriteriaMatch(
+            criteria_id=trap.id, product_id=pid, score=80.0, relevant=True,
+        ))
+        s.commit()
+
+
 def test_pripnuti_zbozi(client, monkeypatch):
     monkeypatch.setattr(
         zbozi, "fetch_detail", lambda url: zbozi.parse_detail(_detail_html())
@@ -164,6 +185,7 @@ def test_refresh_all(client, monkeypatch):
         zbozi, "fetch_detail",
         lambda url: zbozi.parse_detail(_detail_html(min_price=450000)),
     )
+    _hlida(pid)
     assert zbozi_watch.refresh_all() == 1
     with Session(db._engine) as s:
         prices = [ph.price for ph in s.scalars(select(PriceHistory)).all()]
