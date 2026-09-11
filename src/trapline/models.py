@@ -319,6 +319,9 @@ class FeedSource(Base):
     last_run: Mapped[datetime | None] = mapped_column(DateTime)
     #: Krátké shrnutí posledního běhu ("ok, 15 položek" / text chyby).
     last_status: Mapped[str | None] = mapped_column(String(500))
+    #: Od kdy feed nikomu neslouží (ADR-0011). Prázdné = slouží, nebo se
+    #: ho úklid ještě netýká. Po TRAPLINE_FEED_PURGE_DAYS se smaže.
+    useless_since: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

@@ -23,6 +23,7 @@ from . import (
     bazar,
     db,
     discovery,
+    feedcare,
     feedhunt,
     jsonld_watch,
     references,
@@ -78,6 +79,13 @@ def run_cycle() -> None:
     else:
         if not _wait(scoring.status, "skóring"):
             return
+
+    # Až po skóringu — teprve teď je vidět, čí produkty někoho zajímají.
+    try:
+        with db.open_session() as session:
+            feedcare.review(session)
+    except Exception:  # noqa: BLE001 — údržba feedů nesmí zastavit obchůzku
+        log.exception("obchůzka: údržba zdrojů feedů selhala")
 
     try:
         zbozi_watch.refresh_all()

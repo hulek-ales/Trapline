@@ -6,7 +6,7 @@ když DB neběží. Co uživatel uloží v Administraci, se zapíše do tabulky
 promítne přímo do ``settings``, takže zbytek kódu čte pořád jeden objekt
 a nic o vrstvě neví.
 
-Rozsah je záměrně malý — LLM a práh hlídání. Tajné hodnoty (klíč proxy) se ukládají
+Rozsah je záměrně malý — LLM a údržba katalogu. Tajné hodnoty (klíč proxy) se ukládají
 jako každé jiné nastavení, ale ven jdou jen jako „je/není vyplněný".
 """
 
@@ -40,6 +40,7 @@ FIELDS: dict[str, Field] = {
     "llm_bulk": Field(str),
     "llm_load_wait_s": Field(float),
     "watch_min_score": Field(float),
+    "feed_purge_days": Field(lambda v: int(float(v))),
 }
 
 #: Hodnoty z prostředí zachycené při startu — kam se vrací „reset".
